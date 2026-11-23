@@ -21,10 +21,11 @@ const store = {
 // ------------------------------------------------------------------ state
 const G = { mode: 'load', paused: false, story: true, level: 0, wave: -1, phase: '', time: 0, hitstop: 0, shake: 0, slowmo: 0, camX: 0,
   queue: [], spawnT: 0, gap: 0, cap: 6, hpScale: 1, dmgScale: 1, atkGap: .9, lastAtk: 0, boss: null, pending: null, assist: null, unify: null,
-  microUsed: false, overT: 0, card: null, stats: { t: 0, dmg: 0, maxCombo: 0, kills: 0 }, endless: { wave: 0 } };
+  microUsed: false, overT: 0, card: null, stats: { t: 0, dmg: 0, maxCombo: 0, kills: 0 }, endless: { wave: 0 }, pairId: 0, lastTick: 0, chips: 0, storm: null, input: 'kbm' };
 const T = { caf: 150, tagCd: 0, assistCd: 0, bt: 0, aiT: 5, perks: new Set(), pc: 0 };      // team-wide: caffeine, cooldowns, perks, political capital
 const P = { x: -5, z: 1, yaw: Math.PI / 2, st: 'free', t: 0, mv: null, hitDone: false, lspd: 0, buf: null, bufT: 0, inv: 0, root: 0, rev: 0, slow: 0,
-  dodgeCd: 0, dvx: 0, dvz: 0, combo: 0, comboT: 0, castAt: 0, castDur: 0, castDone: false, castFn: null, dodgeProc: false };
+  dodgeCd: 0, dvx: 0, dvz: 0, combo: 0, comboT: 0, castAt: 0, castDur: 0, castDone: false, castFn: null, dodgeProc: false, order: null, auto: false };
+const M = { on: false, sx: 0, sy: 0, x: 0, z: 0, rmb: false, lmb: false };      // the mouse: where it is on screen, the floor point under it, buttons held
 const team = []; let active = 0;
 const enemies = [], hazards = [], zones = [], shots = [], rings = [], beams = [], pickups = [];
 const perk = id => T.perks.has(id);
@@ -84,6 +85,9 @@ const SFX = {
   ko: () => tone(300, 60, .7, 'sawtooth', .28),
   win: () => [523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, f, .3, 'triangle', .2, i * .11)),
   pip: () => tone(330, 220, .3, 'square', .12),
+  tick: () => tone(1500, 1100, .03, 'square', .03),
+  summon: () => { [660, 880, 1320].forEach((f, i) => tone(f, f * 1.2, .09, 'triangle', .1, i * .05)); noise(.2, .06, 3000, 1); },
+  thunder: () => { noise(.4, .3, 170, .4); tone(170, 38, .35, 'sawtooth', .22); },
   full: () => [784, 988, 1175, 1568].forEach((f, i) => tone(f, f, .12, 'square', .08, i * .06)),
 };
 const sfx = n => { if (AC && !muted && SFX[n]) SFX[n](); };
@@ -133,7 +137,7 @@ function flash() { const f = $('flash'); f.className = ''; void f.offsetWidth; f
 function card(html, acts, left = false) {
   $('cardIn').innerHTML = html; $('card').className = 'on' + (left ? ' left' : ''); G.card = acts; $('cardIn').scrollTop = 0;
   for (const d of [...$('float').querySelectorAll('.ft')]) d.remove();
-  bannerT = toastT = 0; $('banner').className = ''; $('toast').className = 'panel';
+  bannerT = toastT = 0; $('banner').className = ''; $('toast').className = 'panel'; PAD.sel = 0; padPick();
   for (const b of $('cardIn').querySelectorAll('[data-act]')) b.onclick = () => { initAudio(); const fn = G.card && G.card[b.dataset.act]; if (fn) { sfx('ui'); fn(); } };
 }
 function closeCard() { $('card').className = ''; G.card = null; }
@@ -166,7 +170,7 @@ function mk(parent, mats, g, color, sx, sy, sz, x, y, z, o = {}) {
   mesh.userData.y0 = y; parent.add(mesh); return mesh;
 }
 function flat(g, color, op) { const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: op, depthWrite: false })); m.rotation.x = -Math.PI / 2; scene.add(m); return m; }
-function kill3(m) { scene.remove(m); m.material.dispose(); }
+function kill3(m) { scene.remove(m); m.material?.dispose(); }          // groups (drones) share their materials and have none of their own
 
 // ------------------------------------------------------------------ the eight rooms
 function amesh(g, color, sx, sy, sz, x, y, z, o = {}) {
@@ -260,8 +264,8 @@ function burst(x, y, z, color, n = 8, spd = 5) {
 }
 const pulses = [], bolts = [];
 function pulse(x, z, color, maxR = 3, dur = .35) { const m = flat(RING(), color, .9); m.position.set(x, .09, z); m.scale.setScalar(.01); pulses.push({ m, t: 0, dur, maxR }); }
-function bolt(x1, y1, z1, x2, y2, z2, color = 0x6fb7ff) {
-  const mat = new THREE.MeshBasicMaterial({ color, transparent: true }), g = new THREE.Group(), n = 5; let px = x1, py = y1, pz = z1;
+function bolt(x1, y1, z1, x2, y2, z2, color = 0x6fb7ff, n = 5) {
+  const mat = new THREE.MeshBasicMaterial({ color, transparent: true }), g = new THREE.Group(); let px = x1, py = y1, pz = z1;
   for (let i = 1; i <= n; i++) {
     const k = i / n, j = i < n ? .45 : 0, qx = x1 + (x2 - x1) * k + rand(-j, j), qy = y1 + (y2 - y1) * k + rand(-j, j), qz = z1 + (z2 - z1) * k + rand(-j, j);
     const s = new THREE.Mesh(BOX(), mat); s.position.set((px + qx) / 2, (py + qy) / 2, (pz + qz) / 2); s.scale.set(.1, .1, Math.hypot(qx - px, qy - py, qz - pz) || .01); s.lookAt(qx, qy, qz); g.add(s); px = qx; py = qy; pz = qz;
@@ -277,10 +281,101 @@ function updateFx(dt) {
   for (let i = bolts.length - 1; i >= 0; i--) { const b = bolts[i]; b.t -= dt; b.mat.opacity = clamp(b.t / .24, 0, 1); if (b.t <= 0) { scene.remove(b.g); b.mat.dispose(); bolts.splice(i, 1); } }
 }
 
+// ------------------------------------------------------------------ Bluetooth magic (Glenn) and summoned agents and drones (Coffee Guy)
+const GLOW = { transparent: true, depthWrite: false, blending: THREE.AdditiveBlending };
+// Invented runes: one stave and a couple of branches each. Deliberately nobody's logo.
+const RUNE_SHAPES = [[[0, -1, .6, -.4], [0, -.2, .6, .4]], [[0, -1, .6, -.5], [.6, -.5, 0, 0]], [[-.5, -.6, 0, 0], [0, 0, .5, -.6]], [[0, -.6, .55, 0], [.55, 0, 0, .6]], [[-.5, .2, 0, -.4], [0, -.4, .5, .2]], [[0, -.9, .5, -.5], [0, .1, .5, .5], [-.5, -.2, 0, .2]]];
+function drawRune(g, k, cx, cy, s) { g.beginPath(); g.moveTo(cx, cy - s); g.lineTo(cx, cy + s); for (const [x1, y1, x2, y2] of RUNE_SHAPES[k % 6]) { g.moveTo(cx + x1 * s, cy + y1 * s); g.lineTo(cx + x2 * s, cy + y2 * s); } g.stroke(); }
+const inkGlow = (g, w) => { g.strokeStyle = '#e6f4ff'; g.lineWidth = w; g.lineCap = g.lineJoin = 'round'; g.shadowColor = '#4aa8ff'; g.shadowBlur = w * 2.2; };
+const runeTexs = [0, 1, 2, 3, 4, 5].map(k => canvasTex(64, 64, g => { inkGlow(g, 5); drawRune(g, k, 32, 32, 20); }));
+const sigilTex = canvasTex(512, 512, g => {               // the circle Glenn draws on the floor: rings, ticks, a hexagram and twelve runes
+  const c = 256; inkGlow(g, 6); g.beginPath(); g.arc(c, c, 238, 0, TAU); g.stroke(); inkGlow(g, 2.5); g.beginPath(); g.arc(c, c, 206, 0, TAU); g.stroke(); g.beginPath(); g.arc(c, c, 122, 0, TAU); g.stroke();
+  for (let i = 0; i < 36; i++) { const a = i / 36 * TAU, r0 = i % 3 ? 214 : 208; g.beginPath(); g.moveTo(c + Math.cos(a) * r0, c + Math.sin(a) * r0); g.lineTo(c + Math.cos(a) * 232, c + Math.sin(a) * 232); g.stroke(); }
+  inkGlow(g, 3); for (let t = 0; t < 2; t++) { g.beginPath(); for (let i = 0; i <= 3; i++) { const a = (i / 3 + t / 6) * TAU - Math.PI / 2; g[i ? 'lineTo' : 'moveTo'](c + Math.cos(a) * 122, c + Math.sin(a) * 122); } g.stroke(); }
+  inkGlow(g, 4); for (let i = 0; i < 12; i++) { g.save(); g.translate(c, c); g.rotate(i / 12 * TAU); g.translate(0, -165); drawRune(g, i, 0, 0, 20); g.restore(); }
+  g.beginPath(); g.arc(c, c, 26, 0, TAU); g.stroke();
+});
+const sigils = [], links = [], allies = [];
+function sigil(x, z, r, ttl, color = 0x6fb7ff, follow = null) {
+  const m = new THREE.Mesh(PLN(), new THREE.MeshBasicMaterial({ map: sigilTex, color, opacity: 0, ...GLOW })); m.rotation.x = -Math.PI / 2; m.position.set(x, .13, z); m.scale.setScalar(r * 2); scene.add(m);
+  sigils.push({ m, t: 0, ttl, follow, spin: rand(.7, 1.4) * pick([-1, 1]) });
+}
+function link(a, b, ttl) { const m = new THREE.Mesh(BOX(), new THREE.MeshBasicMaterial({ color: 0x9fd4ff, opacity: .8, ...GLOW })); scene.add(m); links.push({ a, b, m, t: ttl }); }
+function pairUp(list, ttl) {                              // paired robots are tethered: for a while, a hit on one is partly felt by all of them
+  const id = ++G.pairId; list = list.filter(e => e.alive);
+  list.forEach((e, i) => { e.pair = id; e.pairT = ttl; sigil(e.x, e.z, e.r + .8, ttl, 0x6fb7ff, e); if (i && i < 9) link(list[i - 1], e, ttl); });
+}
+function updateMagic(dt) {
+  for (let i = sigils.length - 1; i >= 0; i--) {
+    const s = sigils[i], f = s.follow; s.t += dt;
+    if (s.t >= s.ttl || (f && !f.alive)) { kill3(s.m); sigils.splice(i, 1); continue; }
+    if (f) s.m.position.set(f.x, .13, f.z);
+    s.m.rotation.z += s.spin * dt; s.m.material.opacity = Math.max(0, Math.min(1, s.t / .18, (s.ttl - s.t) / .35)) * .95;
+  }
+  for (let i = links.length - 1; i >= 0; i--) {
+    const l = links[i]; l.t -= dt;
+    if (l.t <= 0 || !l.a.alive || !l.b.alive) { kill3(l.m); links.splice(i, 1); continue; }
+    const ya = l.a.def.h * l.a.scale * .55, yb = l.b.def.h * l.b.scale * .55, dx = l.b.x - l.a.x, dy = yb - ya, dz = l.b.z - l.a.z;
+    l.m.position.set(l.a.x + dx / 2, ya + dy / 2, l.a.z + dz / 2); l.m.scale.set(.07, .07, Math.hypot(dx, dy, dz) || .01); l.m.lookAt(l.b.x, yb, l.b.z); l.m.material.opacity = Math.min(1, l.t / .4) * (.4 + .45 * Math.random());
+  }
+}
+// Coffee Guy's side of it: delivery drones, and small agents that go and do the work
+const droneBody = new THREE.MeshLambertMaterial({ color: 0x232a33 }), droneBlade = new THREE.MeshBasicMaterial({ color: 0xcfe9ff, transparent: true, opacity: .6, depthWrite: false });
+const agentBody = new THREE.MeshLambertMaterial({ color: 0x14202c, emissive: 0x0b2a44 }), agentGlow = new THREE.MeshBasicMaterial({ color: 0x58c7ff, ...GLOW });
+const agentFace = new THREE.MeshBasicMaterial({ map: face('>_', '#06121f', '#7fe0ff') });
+const part = (g, geo, mat, sx, sy, sz, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.scale.set(sx, sy, sz); m.position.set(x, y, z); g.add(m); return m; };
+function mkDrone() {                                      // a quadcopter with a coffee slung underneath
+  const g = new THREE.Group(); g.userData.rotors = []; part(g, BOX(), droneBody, .42, .1, .42, 0, 0, 0); part(g, SPH(), agentGlow, .1, .1, .1, 0, -.01, .22);
+  for (const [x, z] of [[-.3, -.3], [.3, -.3], [-.3, .3], [.3, .3]]) { part(g, BOX(), droneBody, .07, .05, .07, x, .05, z); g.userData.rotors.push(part(g, BOX(), droneBlade, .36, .012, .05, x, .1, z)); }
+  part(g, CYL(), cupMat, .2, .24, .2, 0, -.2, 0); part(g, CYL(), coffeeMat, .17, .02, .17, 0, -.075, 0); return g;
+}
+function mkAgent() {                                      // a small cube with a prompt for a face and a halo
+  const g = new THREE.Group(); part(g, BOX(), agentBody, .3, .3, .3, 0, 0, 0); part(g, PLN(), agentFace, .24, .24, 1, 0, 0, .155); part(g, BOX(), agentGlow, .03, .16, .03, 0, .23, 0);
+  g.userData.halo = part(g, TOR(), agentGlow, .56, .56, .56, 0, 0, 0); g.userData.halo.rotation.x = Math.PI / 2; return g;
+}
+const AGENT_WORDS = ['thinking…', 'tool call', 'reading the docs', 'retrying', 'done ✔', 'rate limited', 'writing tests', 'plan: punch', 'let me check', 'delegating', 'LGTM', 'compacting…'];
+function spawnAgents(x, z, n, life) {
+  for (let i = 0; i < n; i++) { const g = mkAgent(), a = rand(TAU); g.scale.setScalar(.01); scene.add(g); allies.push({ kind: 'agent', g, x: clamp(x + Math.sin(a) * .8, -AX, AX), z: clamp(z + Math.cos(a) * .8, -AZ, AZ), y: 1.15, t: 0, life: life * rand(.9, 1.1), hitCd: rand(.15, .5), say: rand(.4, 2.4), seed: rand(10), tgt: null }); }
+  floatText(n > 4 ? 'spinning up a fleet…' : 'spawning subagents…', x, 2.7, z, 'tag'); sfx('summon');
+}
+function spawnDrones(n, life) { for (let i = 0; i < n; i++) { const g = mkDrone(); scene.add(g); allies.push({ kind: 'drone', g, i, n, x: P.x, z: P.z, y: 7 + i, t: 0, life, fire: .5 + i * .15 }); } }
+function agentHit() {                                     // chip damage from a summon: it feeds the combo and the caffeine, but never freezes the game
+  if (++G.chips % 3 === 0) { P.combo++; G.stats.maxCombo = Math.max(G.stats.maxCombo, P.combo); }      // every third one counts toward the combo, so a swarm doesn't make it meaningless
+  P.comboT = 2.6; addCaf(2);
+  if (G.time - G.lastTick > .11) { G.lastTick = G.time; sfx('tick'); }
+}
+function updateAllies(dt) {
+  for (let i = allies.length - 1; i >= 0; i--) {
+    const a = allies[i]; a.t += dt;
+    if (a.t > a.life) { burst(a.x, a.y, a.z, 0x58c7ff, 6, 4); if (a.kind === 'agent' && Math.random() < .3) floatText('context window full', a.x, a.y + .5, a.z, 'dim'); scene.remove(a.g); allies.splice(i, 1); continue; }
+    if (a.kind === 'agent') {
+      if (!a.tgt || !a.tgt.alive) a.tgt = nearestEnemy(a.x, a.z, 20, 0, 4);
+      const e = a.tgt, dx = (e ? e.x : P.x) - a.x, dz = (e ? e.z : P.z) - a.z, d = Math.hypot(dx, dz) || .001, want = e ? e.r + .5 : 1.7;
+      if (d > want) { const sp = Math.min(10, 4 + d * 3) * dt; a.x += dx / d * sp + Math.cos(a.t * 7 + a.seed) * dt * 1.5; a.z += dz / d * sp + Math.sin(a.t * 7 + a.seed) * dt * 1.5; }
+      else if (e && (a.hitCd -= dt) <= 0) { a.hitCd = .55; bolt(a.x, a.y, a.z, e.x, e.def.h * e.scale * .5, e.z, 0x7fe0ff, 2); damageEnemy(e, 2.5, { x: a.x, z: a.z, chip: true, quiet: true, pierce: true }); agentHit(); }
+      a.y = 1.15 + Math.sin(a.t * 6 + a.seed) * .12; a.g.position.set(a.x, a.y, a.z); a.g.rotation.y = Math.atan2(dx, dz); a.g.userData.halo.rotation.z += dt * 9;
+      a.g.scale.setScalar(Math.max(.01, Math.min(1, a.t / .25, (a.life - a.t) / .25)) * 1.5);
+      if ((a.say -= dt) <= 0) { a.say = rand(2.2, 4); floatText(pick(AGENT_WORDS), a.x, a.y + .45, a.z, 'dim'); }
+    } else {                                              // an escort drone: circles Coffee Guy and shoots at whatever is closest
+      const ang = a.t * 2.4 + a.i / a.n * TAU; a.x = P.x + Math.sin(ang) * 1.9; a.z = P.z + Math.cos(ang) * 1.9; a.y += (2.5 + Math.sin(a.t * 5 + a.i) * .15 - a.y) * Math.min(1, dt * 6);
+      a.g.position.set(a.x, a.y, a.z); a.g.rotation.y = ang + Math.PI / 2; for (const r of a.g.userData.rotors) r.rotation.y += dt * 40;
+      if ((a.fire -= dt) <= 0) { const e = nearestEnemy(a.x, a.z, 11, 0, 4); a.fire = e ? .6 : .2; if (e) { shot({ x: a.x, z: a.z, y: 1.3, ang: Math.atan2(e.x - a.x, e.z - a.z), speed: 20, r: .16, dmg: 3, color: 0x7fe0ff, friendly: true, ttl: .7 }); sfx('pew'); } }
+    }
+  }
+}
+let auraT = 0;
+function updateAuras(dt) {                                // Glenn's orbiting runes (bright when his special is ready) and Coffee Guy's drone at his shoulder
+  auraT += dt; const t = auraT;
+  for (const f of team) {
+    if (f.runes) f.runes.forEach((s, i) => { const a = t * 1.7 + i * TAU / 3; s.position.set(Math.sin(a) * .8, 1 + i * .36 + Math.sin(t * 2 + i) * .08, Math.cos(a) * .8); s.material.opacity = f.spCd <= 0 ? .95 : .3; });
+    if (f.pet) { f.pet.position.set(.62, 2.12 + Math.sin(t * 3) * .07, -.22); f.pet.rotation.y = Math.sin(t * 1.3) * .5; for (const r of f.pet.userData.rotors) r.rotation.y += dt * 40; }
+  }
+}
+
 // ------------------------------------------------------------------ the tag team
 const FDEF = [
   { key: 'glenn', name: 'GLENNTOOTH', hex: 0xffb347, maxHp: 115, speed: 6.1, dmg: 1.1, rate: 1, spMax: 5.5 },
-  { key: 'coffee', name: 'COFFEE GUY', hex: 0x58c7ff, maxHp: 95, speed: 6.9, dmg: .95, rate: 1.16, spMax: 4.5 },
+  { key: 'coffee', name: 'COFFEE GUY', hex: 0x58c7ff, maxHp: 95, speed: 6.9, dmg: .95, rate: 1.16, spMax: 6 },
 ];
 const GTITLE = ['Acting Director of Connectivity', 'Acting Director of Connectivity', 'VP of Connectivity', 'SVP of Connectivity & Standards', 'SVP of Connectivity & Standards', 'Chief Connectivity Officer', 'Chief Connectivity Officer', 'Chief Connectivity Officer'];
 const loader = new GLTFLoader(), progress = {};
@@ -299,6 +394,8 @@ async function loadFighter(def) {
   scene.add(g);
   const f = { ...def, g, model, mats, mixer: new THREE.AnimationMixer(model), actions: {}, cur: null, curName: '', hp: def.maxHp, rec: def.maxHp, ko: false, spCd: 0, pip: 0, flash: 0, tint: 0xffffff, modelH: h };
   for (const c of gltf.animations) f.actions[c.name] = f.mixer.clipAction(c);
+  if (def.key === 'glenn') f.runes = [0, 2, 4].map(k => { const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: runeTexs[k], color: 0x8fd0ff, ...GLOW })); s.scale.setScalar(.36); g.add(s); return s; });
+  else { f.pet = mkDrone(); f.pet.scale.setScalar(.8); g.add(f.pet); }
   loopClip(f, 'Idle'); return f;
 }
 function loopClip(f, name, ts = 1) {
@@ -326,7 +423,7 @@ function portrait(f) {                                    // render the fighter'
 // ------------------------------------------------------------------ caffeine
 const CAF_TIERS = [[100, 'Drowsy', .9], [400, 'Optimal', 1], [600, 'Buzzing', 1.08], [800, 'Wired', 1.15], [Infinity, 'LB MODE', 1.25]];
 const cafTier = () => CAF_TIERS.find(t => T.caf < t[0]);
-function addCaf(v) { const was = T.caf; T.caf = clamp(T.caf + v, 0, 800); if (was < 800 && T.caf >= 800) { sfx('full'); toast('<b>800mg.</b> LB Mode. Press <kbd>F</kbd> for a super.', 3); } }
+function addCaf(v) { const was = T.caf; T.caf = clamp(T.caf + v, 0, 800); if (was < 800 && T.caf >= 800) { sfx('full'); toast(`<b>800mg.</b> LB Mode. Press <kbd>${K('super')}</kbd> for a super.`, 3); } }
 const dmgMult = () => cafTier()[2] * (perk('board') ? 1.15 : 1) * (T.bt > 0 ? 1.4 : 1);
 
 // ------------------------------------------------------------------ things that hurt: telegraphed circles, puddles, projectiles, shockwaves, beams
@@ -357,24 +454,31 @@ function updateZones(dt) {
 function shot(o) {
   if (o.from) { o.x = o.from.x; o.z = o.from.z; o.owner = o.from; o.y = o.y ?? Math.min(1.4, o.from.def.h * .5); }
   const s = { r: .34, ttl: 4, y: 1.2, homing: 0, color: 0xff5555, ...o };
-  s.m = new THREE.Mesh(s.cup ? CYL() : s.card ? BOX() : SPH(), new THREE.MeshBasicMaterial({ color: s.color }));
-  if (s.card) s.m.scale.set(s.r * 2.4, s.r * 1.7, .08); else if (s.cup) s.m.scale.set(.34, .42, .34); else s.m.scale.setScalar(s.r * 2);
+  s.m = s.drone ? mkDrone() : new THREE.Mesh(s.card ? BOX() : SPH(), new THREE.MeshBasicMaterial({ color: s.color }));
+  if (s.drone) { s.m.scale.setScalar(1.25); s.m.rotation.y = s.ang; } else if (s.card) s.m.scale.set(s.r * 2.4, s.r * 1.7, .08); else s.m.scale.setScalar(s.r * 2);
   s.vx = Math.sin(s.ang) * s.speed; s.vz = Math.cos(s.ang) * s.speed; s.m.position.set(s.x, s.y, s.z); scene.add(s.m); shots.push(s); return s;
 }
 function updateShots(eDt, dt) {
   for (let i = shots.length - 1; i >= 0; i--) {
-    const s = shots[i], d = s.friendly ? dt : eDt; s.ttl -= d;
+    const s = shots[i]; if (!s) continue;                 // an espresso that finishes off a boss clears the room, this list included
+    const d = s.friendly ? dt : eDt; s.ttl -= d;
     if (s.homing) { const cur = Math.atan2(s.vx, s.vz), a = cur + clamp(angDiff(Math.atan2(P.x - s.x, P.z - s.z), cur), -s.homing * d, s.homing * d); s.vx = Math.sin(a) * s.speed; s.vz = Math.cos(a) * s.speed; }
-    s.x += s.vx * d; s.z += s.vz * d; s.m.position.set(s.x, s.y, s.z); s.m.rotation.y += d * 7;
+    s.x += s.vx * d; s.z += s.vz * d; s.m.position.set(s.x, s.y, s.z);
+    if (s.drone) for (const r of s.m.userData.rotors) r.rotation.y += d * 40; else s.m.rotation.y += d * 7;
     let dead = s.ttl <= 0 || Math.abs(s.x) > AX + 4 || Math.abs(s.z) > AZ + 4;
-    if (s.friendly) { if (!dead) for (const e of enemies) if (e.spawn <= 0 && Math.hypot(e.x - s.x, e.z - s.z) < e.r + s.r + .25) { dead = true; break; } if (dead) splash(s); }
+    if (s.friendly) {                                     // a delivery drone flies to where it was sent; anything else stops at the first robot it meets
+      let hit = null; if (!dead && !s.fly) for (const e of enemies) if (e.spawn <= 0 && Math.hypot(e.x - s.x, e.z - s.z) < e.r + s.r + .25) { hit = e; dead = true; break; }
+      if (dead && s.splash) splash(s);
+      else if (hit) { burst(s.x, s.y, s.z, s.color, 3, 3); damageEnemy(hit, s.dmg, { x: s.x, z: s.z, chip: true, quiet: true, pierce: true }); agentHit(); }
+    }
     else if (!dead && Math.hypot(P.x - s.x, P.z - s.z) < s.r + .5 && hurtPlayer(s.dmg, s)) dead = true;
-    if (dead) { kill3(s.m); shots.splice(i, 1); }
+    if (dead) { kill3(s.m); const j = shots.indexOf(s); if (j >= 0) shots.splice(j, 1); }
   }
 }
 function splash(s) {                                      // Coffee Guy's espresso landing
   let n = 0; for (const e of [...enemies]) if (Math.hypot(e.x - s.x, e.z - s.z) < s.splash + e.r && damageEnemy(e, s.dmg, { x: s.x, z: s.z, kb: 9, heavy: true, pierce: true, stun: .7, word: n ? null : 'SCALDED' })) n++;
   pulse(s.x, s.z, 0xc98a3a, s.splash * 1.1, .35); burst(s.x, .8, s.z, 0x8b5a2b, 18, 7); burst(s.x, .8, s.z, 0xf4f1e8, 6, 5); sfx('splash'); if (n) landed(true, n, 9 * n);
+  if (s.agents && G.phase !== 'done') { pulse(s.x, s.z, 0x58c7ff, 2.2, .4); spawnAgents(s.x, s.z, s.agents, 5); }       // and out of the splash climb the agents
 }
 function ringWave(o) { const r = { r: .6, dir: 1, hit: false, color: 0xff4d4d, ...o }; r.m = flat(RING(), r.color, .95); r.m.position.set(r.x, .1, r.z); r.m.scale.setScalar(r.r); rings.push(r); sfx('warn'); }
 function updateRings(dt) {
@@ -407,7 +511,10 @@ function clearCombat(all) {
   for (const s of shots) kill3(s.m); shots.length = 0;
   for (const r of rings) kill3(r.m); rings.length = 0;
   for (const b of beams) { scene.remove(b.g); b.m.material.dispose(); } beams.length = 0;
-  if (all) { for (const p of pickups) scene.remove(p.g); pickups.length = 0; }
+  if (all) {
+    for (const p of pickups) scene.remove(p.g); pickups.length = 0;
+    for (const a of allies) scene.remove(a.g); allies.length = 0; for (const s of sigils) kill3(s.m); sigils.length = 0; for (const l of links) kill3(l.m); links.length = 0; G.storm = null;
+  }
 }
 const cupMat = new THREE.MeshLambertMaterial({ color: 0xf4f1e8 }), coffeeMat = new THREE.MeshLambertMaterial({ color: 0x5a3a22 }), donutMat = new THREE.MeshLambertMaterial({ color: 0xff8fc7, emissive: 0x4a1030 });
 function dropPickup(x, z, kind) {
@@ -606,7 +713,7 @@ function* brainRanker(b) {
     if (b.t > b.nextPip) {
       b.nextPip = b.t + 13; say(b, 'You are in the bottom 10%.'); b.intent = 'hold'; b.wind = .7; yield .7;
       const f = team[active]; f.pip = 9; sfx('pip'); floatText('PERFORMANCE IMPROVEMENT PLAN', P.x, 3, P.z, 'bad');
-      if (!b.told) { b.told = true; toast('<b>Jeremy:</b> you are on a PIP and take nearly double damage. Tag out with <kbd>Q</kbd> and the paperwork cannot find you.', 6); }
+      if (!b.told) { b.told = true; toast(`<b>Jeremy:</b> you are on a PIP and take nearly double damage. Tag out with <kbd>${K('tag')}</kbd> and the paperwork cannot find you.`, 6); }
       yield .5; continue;
     }
     const r = Math.random();
@@ -707,14 +814,14 @@ const BOTS = {
   yesbot: { hp: 36, speed: 3, r: .55, h: 1.9, keep: 8, pc: 22, brain: brainYes, color: 0xffd43b },
   loop: { hp: 48, speed: 2, r: .65, h: 1.9, dmg: 10, pc: 20, brain: brainLoop, bounce: true, color: 0x2f9e9e },
   pod: { hp: 14, speed: 3.6, r: .4, h: 1.1, reach: 1.2, hr: .9, delay: .4, dmg: 5, rest: .9, pc: 3, brain: brainMelee, minor: true, color: 0x3b7de0 },
-  synergy: { boss: true, name: 'SYNERGY-9000', sub: 'Standup facilitator · three hours, nothing decided', epitaph: 'Action items: none. Owner: nobody.', hp: 780, speed: 1.9, r: 1.3, h: 4.4, reach: 3, turn: 4, brain: brainSynergy, color: 0x1f8f8f },
-  barista: { boss: true, name: 'BARISTA-GPT', sub: 'AI-native espresso · will not brew, will write a haiku about brewing', epitaph: 'The office now has a kettle. Morale is up 40%.', hp: 950, speed: 1.6, r: 1.7, h: 3.9, reach: 3, turn: 4, brain: brainBarista, color: 0xb8bcc4 },
-  ranker: { boss: true, name: 'THE STACK RANKER', sub: 'Calibration engine · someone must be in the bottom 10%', epitaph: 'Everyone is now rated “present”.', hp: 1100, speed: 2, r: 1.5, h: 4.2, reach: 3, turn: 4, brain: brainRanker, color: 0x384b8a },
-  fridge: { boss: true, name: 'KUBERFRIDGE', sub: 'Smart fridge running Kubernetes · desired: lunch, current: 0', epitaph: 'kubectl delete fridge. Lunch is eventually consistent.', hp: 1300, speed: 1.5, r: 1.5, h: 4.3, reach: 3, turn: 4, brain: brainFridge, color: 0xd5dbe1 },
-  sync: { boss: true, name: 'CROSS-FUNCTIONAL SYNC', sub: 'Seven managers, zero engineers · this meeting is now recurring', epitaph: 'This meeting has been converted to an email. Nobody read it.', hp: 1400, speed: 2, r: 1.5, h: 3.7, keep: 6, turn: 4, brain: brainSync, color: 0x3a4250 },
-  lgtm: { boss: true, name: 'LGTM-1000', sub: 'Rogue code review bot · “Not AI-native. Changes requested.”', epitaph: 'Hotfix merged. Shipped on a Friday, without fear.', hp: 1500, speed: 1.8, r: 1.7, h: 4, reach: 3, turn: 1.5, shield: true, brain: brainLgtm, color: 0xcfd6de },
-  vpai: { boss: true, name: 'VP OF AI TRANSFORMATION', sub: 'Role created above you · has never shipped a product', epitaph: 'The role has been dissolved. So has the task force on dissolving it.', hp: 1700, speed: 2.6, r: 1, h: 4.8, keep: 5, turn: 5, brain: brainVpai, color: 0xffd166 },
-  ceo: { boss: true, name: 'THE CEO’S AI CLONE', sub: 'Handles all communications now · twelve slides, no questions', epitaph: 'Communications will now be handled by nobody, which is an improvement.', hp: 2800, speed: 1.7, r: 1.5, h: 5.5, reach: 3, turn: 4, brain: brainCeo, color: 0x58c7ff,
+  synergy: { boss: true, name: 'SYNERGY-9000', sub: 'Standup facilitator · three hours, nothing decided', epitaph: 'Action items: none. Owner: nobody.', hp: 1250, speed: 1.9, r: 1.3, h: 4.4, reach: 3, turn: 4, brain: brainSynergy, color: 0x1f8f8f },
+  barista: { boss: true, name: 'BARISTA-GPT', sub: 'AI-native espresso · will not brew, will write a haiku about brewing', epitaph: 'The office now has a kettle. Morale is up 40%.', hp: 1500, speed: 1.6, r: 1.7, h: 3.9, reach: 3, turn: 4, brain: brainBarista, color: 0xb8bcc4 },
+  ranker: { boss: true, name: 'THE STACK RANKER', sub: 'Calibration engine · someone must be in the bottom 10%', epitaph: 'Everyone is now rated “present”.', hp: 1750, speed: 2, r: 1.5, h: 4.2, reach: 3, turn: 4, brain: brainRanker, color: 0x384b8a },
+  fridge: { boss: true, name: 'KUBERFRIDGE', sub: 'Smart fridge running Kubernetes · desired: lunch, current: 0', epitaph: 'kubectl delete fridge. Lunch is eventually consistent.', hp: 2100, speed: 1.5, r: 1.5, h: 4.3, reach: 3, turn: 4, brain: brainFridge, color: 0xd5dbe1 },
+  sync: { boss: true, name: 'CROSS-FUNCTIONAL SYNC', sub: 'Seven managers, zero engineers · this meeting is now recurring', epitaph: 'This meeting has been converted to an email. Nobody read it.', hp: 2250, speed: 2, r: 1.5, h: 3.7, keep: 6, turn: 4, brain: brainSync, color: 0x3a4250 },
+  lgtm: { boss: true, name: 'LGTM-1000', sub: 'Rogue code review bot · “Not AI-native. Changes requested.”', epitaph: 'Hotfix merged. Shipped on a Friday, without fear.', hp: 2400, speed: 1.8, r: 1.7, h: 4, reach: 3, turn: 1.5, shield: true, brain: brainLgtm, color: 0xcfd6de },
+  vpai: { boss: true, name: 'VP OF AI TRANSFORMATION', sub: 'Role created above you · has never shipped a product', epitaph: 'The role has been dissolved. So has the task force on dissolving it.', hp: 2700, speed: 2.6, r: 1, h: 4.8, keep: 5, turn: 5, brain: brainVpai, color: 0xffd166 },
+  ceo: { boss: true, name: 'THE CEO’S AI CLONE', sub: 'Handles all communications now · twelve slides, no questions', epitaph: 'Communications will now be handled by nobody, which is an improvement.', hp: 4500, speed: 1.7, r: 1.5, h: 5.5, reach: 3, turn: 4, brain: brainCeo, color: 0x58c7ff,
     anim(e) { e.parts.head.material.color.setHex([0x58c7ff, 0xff5ad1, 0xff4d4d][e.phase - 1] ?? 0x58c7ff); const used = 12 - Math.ceil(12 * Math.max(0, e.hp) / e.maxHp); e.parts.ring.children.forEach((s, i) => { s.visible = i >= used; }); } },
 };
 const shadowMat = new THREE.MeshBasicMaterial({ color: 0, transparent: true, opacity: .3, depthWrite: false });
@@ -725,7 +832,7 @@ function spawnEnemy(type, x, z, o = {}) {
   const sc = o.scale || 1, hp = o.decoy ? 1 : (o.hp || def.hp) * (def.boss ? (o.hpMul || 1) : G.hpScale), spawn = def.boss ? 1.1 : .5;
   const e = { type, def, g, body, parts, mats, x, z, yaw: Math.atan2(P.x - x, P.z - z), hp, maxHp: hp, r: def.r * sc, speed: def.speed, reach: def.reach || 2, keep: def.keep || 6, scale: sc,
     vx: 0, vz: 0, cvx: 0, cvz: 0, stun: 0, flash: 0, wind: 0, lunge: 0, wait: rand(.2), intent: 'hold', boss: !!def.boss, t: 0, alive: true, spawn, spawn0: spawn, decoy: !!o.decoy, gen: o.gen || 0,
-    side: pick([-1, 1]), seed: rand(10), contact: 0, contactCd: 0, open: 0, vuln: 0, haste: 0, dizzy: 0, grow: 1, spin: 0, vs: 0, flipCd: 0, pull: 0, phase: 1 };
+    side: pick([-1, 1]), seed: rand(10), contact: 0, contactCd: 0, open: 0, vuln: 0, haste: 0, dizzy: 0, grow: 1, spin: 0, vs: 0, flipCd: 0, pull: 0, phase: 1, pair: 0, pairT: 0 };
   e.script = def.brain(e); g.position.set(x, 0, z); g.rotation.y = e.yaw; g.scale.setScalar(.01); scene.add(g); enemies.push(e); def.init?.(e, o); return e;
 }
 function spawnAtEdge(type) {
@@ -745,10 +852,11 @@ function damageEnemy(e, dmg, o = {}) {
   }
   if (e.vuln > 0 || (e.def.shield && e.open > 0)) d *= 1.4;
   if (e.type === 'barista' && team[active].key === 'coffee') d *= 1.25;                                              // it's personal
-  e.hp -= d; e.flash = .1;
-  floatText(o.word || String(Math.max(1, Math.round(d))), e.x, hy, e.z, o.word ? 'word' : '');
-  burst(e.x, hy * .7, e.z, e.def.color, o.heavy ? 6 : 3, 4);
-  if (!e.boss) {
+  e.hp -= d; e.flash = o.chip ? .05 : .1;
+  if (o.quiet) burst(e.x, hy * .7, e.z, 0x9fd4ff, 1, 3);                                                              // chip damage from agents, drones and tethers: no numbers, no stagger
+  else { floatText(o.word || String(Math.max(1, Math.round(d))), e.x, hy, e.z, o.word ? 'word' : ''); burst(e.x, hy * .7, e.z, e.def.color, o.heavy ? 6 : 3, 4); }
+  if (e.pairT > 0 && !o.shared) for (const q of [...enemies]) if (q !== e && q.pair === e.pair && q.pairT > 0) damageEnemy(q, dmg * .3, { shared: true, chip: true, quiet: true, pierce: true });      // paired devices share
+  if (!e.boss && !o.chip) {
     const a = Math.atan2(e.x - ox, e.z - oz), tough = (e.def.armor || e.grow >= 1.5) && !o.heavy && !o.pierce, kb = (o.kb || 0) * (tough ? .25 : 1);       // the heavy ones do not flinch from a jab
     if (!tough) { e.stun = Math.max(e.stun, o.stun ?? .32); e.wind = 0; e.contact = 0; e.spin = 0; e.intent = 'hold'; e.script = e.def.brain(e); e.wait = 0; }
     e.vx += Math.sin(a) * kb; e.vz += Math.cos(a) * kb;
@@ -807,7 +915,7 @@ function updateEnemies(dt, real) {
       if (e.boss) { e.g.position.y = (1 - k) * (1 - k) * 14; if (e.spawn <= 0) { G.shake = .9; pulse(e.x, e.z, 0xffffff, 7, .5); sfx('boom'); burst(e.x, .3, e.z, 0xcccccc, 20, 8); } }
       continue;
     }
-    if (e.flash > 0) e.flash -= real; if (e.open > 0) e.open -= dt; if (e.vuln > 0) e.vuln -= dt; if (e.haste > 0) e.haste -= dt; if (e.dizzy > 0) e.dizzy -= dt; if (e.contactCd > 0) e.contactCd -= dt; if (e.flipCd > 0) e.flipCd -= dt;
+    if (e.flash > 0) e.flash -= real; if (e.open > 0) e.open -= dt; if (e.vuln > 0) e.vuln -= dt; if (e.haste > 0) e.haste -= dt; if (e.dizzy > 0) e.dizzy -= dt; if (e.contactCd > 0) e.contactCd -= dt; if (e.flipCd > 0) e.flipCd -= dt; if (e.pairT > 0) e.pairT -= dt;
     let moving = false;
     if (e.stun > 0) e.stun -= dt;
     else {
@@ -862,36 +970,80 @@ const MOVES = {
 const DODGE_WORDS = ['DECLINED', 'OUT OF OFFICE', 'SNOOZED', 'NOT IT', 'TENTATIVE'];
 const COMBO_RANKS = [[5, 'ALIGNED'], [10, 'STAKEHOLDER-ALIGNED'], [18, 'SYNERGISTIC'], [28, '10x'], [40, 'AI-NATIVE'], [60, 'LORD BLUETOOTH']];
 const keys = new Set(), touch = { x: 0, y: 0 };
-function inputDir() {
-  let x = (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0) + touch.x;
-  let z = (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0) - (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0) + touch.y;
+function inputDir() {                                     // arrow keys or the touch stick; the mouse gives orders instead (see order())
+  let x = (keys.has('ArrowRight') ? 1 : 0) - (keys.has('ArrowLeft') ? 1 : 0) + touch.x + PAD.x;
+  let z = (keys.has('ArrowDown') ? 1 : 0) - (keys.has('ArrowUp') ? 1 : 0) + touch.y + PAD.y;
   const l = Math.hypot(x, z); if (l > 1) { x /= l; z /= l; }
   if (P.rev > 0) { x = -x; z = -z; }
   return [x, z, l > .2];
 }
+// ---- MOBA-style mouse control: right-click to move or attack, everything else aims at the cursor
+const _ray = new THREE.Raycaster(), _ndc = new THREE.Vector2(), _floor = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), _hit = new THREE.Vector3();
+function mouseGround() {                                  // the point on the floor under the cursor
+  _ndc.set(M.sx / innerWidth * 2 - 1, 1 - M.sy / innerHeight * 2); _ray.setFromCamera(_ndc, camera);
+  if (_ray.ray.intersectPlane(_floor, _hit)) { M.x = clamp(_hit.x, -AX - 3, AX + 3); M.z = clamp(_hit.z, -AZ - 3, AZ + 3); }
+}
+function enemyAtCursor() {                                // robots are tall, so test against their outline on screen, not the floor point
+  let best = null, bd = 1e9;
+  for (const e of enemies) {
+    if (e.spawn > 0) continue;
+    const [x0, y0] = toScreen(e.x, 0, e.z), [x1, y1] = toScreen(e.x, e.def.h * e.scale * e.grow, e.z), [xr] = toScreen(e.x + e.r, 0, e.z);
+    const t = clamp((M.sy - y0) / ((y1 - y0) || -1), 0, 1), d = Math.hypot(M.sx - (x0 + (x1 - x0) * t), M.sy - (y0 + (y1 - y0) * t));
+    if (d < Math.abs(xr - x0) + 14 && d < bd) { bd = d; best = e; }
+  }
+  return best;
+}
+function order(amove, ping = true) {                      // right-click (or A for attack-move): go there, or go and keep hitting that
+  if (G.mode !== 'play' || G.paused || P.st === 'ko' || !M.on) return;
+  mouseGround();
+  const pt = { x: clamp(M.x, -AX, AX), z: clamp(M.z, -AZ, AZ) }, e = enemyAtCursor() || (amove ? nearestEnemy(M.x, M.z, 4.5, 0, 4) : null);
+  if (e) { if (!P.order || P.order.e !== e) { P.order = { t: 'atk', e, then: amove ? pt : null }; if (ping) pulse(e.x, e.z, 0xff5a5a, e.r + .9, .3); } }
+  else { P.order = { t: amove ? 'amove' : 'move', x: pt.x, z: pt.z }; if (ping) pulse(pt.x, pt.z, amove ? 0xff5a5a : 0x7ee787, .9, .3); }
+}
+function followOrder() {                                  // turn the current order into a direction to walk in, or a robot to swing at
+  let o = P.order; if (!o) return null;
+  if (o.t === 'amove') { const n = nearestEnemy(P.x, P.z, 6.5, 0, 4); if (n) o = P.order = { t: 'atk', e: n, then: { x: o.x, z: o.z } }; }
+  if (o.t === 'atk' && !o.e.alive) {                      // it's down: pick the next one nearby, or carry on to where the attack-move was headed
+    const n = nearestEnemy(P.x, P.z, 7, 0, 4); o = P.order = n ? { t: 'atk', e: n, then: o.then } : o.then ? { t: 'amove', x: o.then.x, z: o.then.z } : null; if (!o) return null;
+  }
+  const atk = o.t === 'atk', dx = (atk ? o.e.x : o.x) - P.x, dz = (atk ? o.e.z : o.z) - P.z, d = Math.hypot(dx, dz) || .001;
+  if (atk) { if (d - o.e.r < 1.35) return { hit: o.e }; } else if (d < .2) { P.order = null; return null; }
+  const s = P.rev > 0 ? -1 : 1; return { x: dx / d * s, z: dz / d * s };       // a prompt injection sends you the wrong way
+}
+const tgtRing = flat(RING(), 0xff5a5a, .95), dstRing = flat(RING(), 0x7ee787, .85); tgtRing.visible = dstRing.visible = false;
+const autoTgt = () => P.auto && P.order && P.order.t === 'atk' && P.order.e.alive ? P.order.e : null;
+const aimYaw = () => { const dx = M.x - P.x, dz = M.z - P.z; return Math.hypot(dx, dz) > .6 ? Math.atan2(dx, dz) : P.yaw; };
 function nearestEnemy(x, z, maxD, yaw, arc) {
   let best = null, bd = maxD;
   for (const e of enemies) { if (e.spawn > 0) continue; const dx = e.x - x, dz = e.z - z, d = Math.hypot(dx, dz) - e.r; if (d < bd && (arc >= 3.1 || Math.abs(angDiff(Math.atan2(dx, dz), yaw)) < arc)) { bd = d; best = e; } }
   return best;
 }
 const atkRate = f => f.rate * (T.bt > 0 ? 1.5 : 1) * (perk('debt') ? 1.12 : 1);
-function startMove(id) {
+function startMove(id, tgt0) {
   const f = team[active], m = MOVES[id], [ix, iz, moving] = inputDir();
   P.st = 'attack'; P.mv = m; P.t = 0; P.hitDone = false;
-  let want = moving ? Math.atan2(ix, iz) : P.yaw;
-  const tgt = nearestEnemy(P.x, P.z, 5, want, moving ? 1.3 : 3.2);                // lean toward whoever you are obviously trying to hit
+  let want = moving ? Math.atan2(ix, iz) : M.on ? aimYaw() : P.yaw;
+  const tgt = tgt0 || nearestEnemy(P.x, P.z, 5, want, moving || M.on ? 1.3 : 3.2);       // lean toward whoever you are obviously trying to hit
   let dist = m.lunge;
   if (tgt) { want = Math.atan2(tgt.x - P.x, tgt.z - P.z); dist = clamp(Math.hypot(tgt.x - P.x, tgt.z - P.z) - tgt.r - 1, 0, m.lunge * 2.2); }
   P.yaw = want; P.lspd = dist / (m.dur * m.hit); oneShot(f, m.clip, m.dur / atkRate(f)); sfx('swing');
 }
 function doStrike(m) {
-  const f = team[active]; let n = 0;
+  const f = team[active]; let n = 0, last = null;
   for (const e of [...enemies]) {
     const dx = e.x - P.x, dz = e.z - P.z, d = Math.hypot(dx, dz);
     if (d - e.r > m.range || (m.arc < 6 && d > .7 && Math.abs(angDiff(Math.atan2(dx, dz), P.yaw)) > m.arc / 2)) continue;
-    if (damageEnemy(e, m.dmg * f.dmg, { kb: m.kb, heavy: m.heavy })) n++;
+    if (damageEnemy(e, m.dmg * f.dmg, { kb: m.kb, heavy: m.heavy })) { n++; last = e; }
   }
   if (n) landed(m.heavy, n, m.caf);
+  if (!n || !m.heavy) return;
+  if (f.key === 'glenn') {                                // a heavy hit from Glenn arcs to one more robot nearby
+    let q = null, bd = 4.5; for (const e of enemies) { if (e === last || e.spawn > 0) continue; const d = Math.hypot(e.x - last.x, e.z - last.z) - e.r; if (d < bd) { bd = d; q = e; } }
+    if (q) { bolt(last.x, 1.3, last.z, q.x, q.def.h * q.scale * .5, q.z, 0x9fd4ff, 3); damageEnemy(q, 7, { x: last.x, z: last.z, chip: true, pierce: true, word: 'STATIC' }); }
+  } else {                                                // and Coffee Guy's drone takes a shot of its own
+    const e = last.alive ? last : nearestEnemy(P.x, P.z, 8, 0, 4);
+    if (e) shot({ x: P.x, z: P.z, y: 1.5, ang: Math.atan2(e.x - P.x, e.z - P.z), speed: 20, r: .16, dmg: 6, color: 0x7fe0ff, friendly: true, ttl: .6 });
+  }
 }
 function landed(heavy, n, caf) {
   G.hitstop = heavy ? .085 : .045; G.shake = Math.max(G.shake, heavy ? .35 : .14); sfx(heavy ? 'heavy' : 'hit'); addCaf(caf * (perk('coffee') ? 1.3 : 1));
@@ -899,50 +1051,66 @@ function landed(heavy, n, caf) {
 }
 function endCombo() { if (P.combo >= 5) T.pc += P.combo * 2; P.combo = 0; P.comboT = 0; }
 function startDodge() {
-  const f = team[active], [ix, iz, moving] = inputDir(), a = moving ? Math.atan2(ix, iz) : P.yaw + Math.PI;
+  const f = team[active], [ix, iz, moving] = inputDir(), toCursor = !moving && M.on && Math.hypot(M.x - P.x, M.z - P.z) > .6;
+  const a = moving ? Math.atan2(ix, iz) : toCursor ? aimYaw() : P.yaw + Math.PI;       // toward the cursor, like a blink; straight back if there is nothing to aim at
   P.st = 'dodge'; P.t = .34; P.dvx = Math.sin(a) * 13; P.dvz = Math.cos(a) * 13; P.inv = Math.max(P.inv, .34); P.dodgeCd = .55; P.dodgeProc = false;
-  if (moving) P.yaw = a; oneShot(f, 'DuckDodge', .4); sfx('dodge');
+  if (P.order && P.order.t === 'move' && !M.rmb) P.order = null;                       // don't stroll back into what you just dodged
+  if (f.key === 'glenn') { bolt(P.x, 1, P.z, clamp(P.x + Math.sin(a) * 4.4, -AX, AX), 1, clamp(P.z + Math.cos(a) * 4.4, -AZ, AZ), 0x8fd0ff, 4); pulse(P.x, P.z, 0x6fb7ff, 1.3, .25); }      // Glenn hops frequency
+  else burst(P.x, .7, P.z, 0xe9e2d0, 10, 3);                                           // Coffee Guy leaves steam
+  if (moving || toCursor) P.yaw = a; oneShot(f, 'DuckDodge', .4); sfx('dodge');
 }
-function castSpecial(f, x, z, yaw) {
+function castSpecial(f, x, z, yaw, aim) {               // aim: the floor point under the cursor, when there is a mouse
   if (f.key === 'glenn') {                              // Pair: chain every robot in range together. Really good at Bluetooth, of course.
-    sfx('pair'); pulse(x, z, 0x6fb7ff, 4, .4);
+    sfx('pair'); pulse(x, z, 0x6fb7ff, 4, .4); sigil(x, z, 1.7, .7);
     let from = { x, y: 1.3, z }, n = 0; const done = new Set();
     for (let i = 0; i < 6; i++) {
-      let best = null, bd = i ? 6.5 : 11;
-      for (const e of enemies) { if (done.has(e) || e.spawn > 0) continue; const d = Math.hypot(e.x - from.x, e.z - from.z) - e.r; if (d < bd) { bd = d; best = e; } }
+      let best = null, bd = 1e9; const lim = i ? 6.5 : 11, near = i || !aim ? from : aim;       // the chain starts at the robot nearest the cursor
+      for (const e of enemies) { if (done.has(e) || e.spawn > 0 || Math.hypot(e.x - from.x, e.z - from.z) - e.r > lim) continue; const d = Math.hypot(e.x - near.x, e.z - near.z) - e.r; if (d < bd) { bd = d; best = e; } }
       if (!best) break;
       done.add(best); const to = { x: best.x, y: best.def.h * best.scale * .6, z: best.z }; bolt(from.x, from.y, from.z, to.x, to.y, to.z);
       damageEnemy(best, 15 * f.dmg, { x: from.x, z: from.z, kb: 1, stun: 1.6, pierce: true, word: 'PAIRED' }); from = to; n++;
     }
-    if (n) landed(false, n, 8 * n); else floatText('No devices found.', x, 2.4, z, 'dim');
-  } else {                                               // Espresso shot: scalding, and it splashes
-    sfx('throw'); shot({ x: x + Math.sin(yaw) * .7, z: z + Math.cos(yaw) * .7, y: 1.3, ang: yaw, speed: 17, r: .3, dmg: 24 * f.dmg, color: 0xf4f1e8, friendly: true, splash: 2.8, ttl: .75, cup: true });
+    if (n) { landed(false, n, 8 * n); pairUp([...done], 4); } else floatText('No devices found.', x, 2.4, z, 'dim');          // and they stay tethered for a while
+  } else {                                               // Deploy: a delivery drone drops a scalding espresso, and a swarm of agents climbs out of the splash
+    const ttl = aim ? clamp((Math.hypot(aim.x - x, aim.z - z) - .7) / 17, .1, .75) : .75;      // with a mouse it lands where you point
+    sfx('throw'); shot({ x: x + Math.sin(yaw) * .7, z: z + Math.cos(yaw) * .7, y: 2.1, ang: yaw, speed: 17, r: .3, dmg: 18 * f.dmg, friendly: true, splash: 2.8, ttl, drone: true, fly: !!aim, agents: 4 });
   }
 }
 function startSpecial() {
   const f = team[active]; if (f.spCd > 0) return;
   f.spCd = f.spMax * (perk('rfc') ? .7 : 1); P.st = 'cast'; P.t = 0; P.castAt = .18; P.castDur = .48; P.castDone = false; P.inv = Math.max(P.inv, .25);
-  const tgt = nearestEnemy(P.x, P.z, 11, P.yaw, 3.2); if (tgt) P.yaw = Math.atan2(tgt.x - P.x, tgt.z - P.z);
-  oneShot(f, f.key === 'glenn' ? 'CombatStance' : 'RightStraightPunch', .48); P.castFn = () => castSpecial(f, P.x, P.z, P.yaw);
+  let aim = null;
+  if (M.on) { const e = PAD.aim ? null : enemyAtCursor(); aim = e ? { x: e.x, z: e.z } : { x: M.x, z: M.z }; P.yaw = Math.atan2(aim.x - P.x, aim.z - P.z); }
+  else { const tgt = nearestEnemy(P.x, P.z, 11, P.yaw, 3.2); if (tgt) P.yaw = Math.atan2(tgt.x - P.x, tgt.z - P.z); }
+  oneShot(f, f.key === 'glenn' ? 'CombatStance' : 'RightStraightPunch', .48); P.castFn = () => castSpecial(f, P.x, P.z, P.yaw, aim);
 }
 function startSuper() {
   const f = team[active]; if (T.caf < 800) { floatText('Needs 800mg', P.x, 2.6, P.z, 'dim'); return; }
-  T.caf = 0; P.st = 'cast'; P.t = 0; P.castDone = false; P.inv = Math.max(P.inv, 1.7); flash(); sfx('super'); G.shake = .5;
+  T.caf = 0; P.st = 'cast'; P.t = 0; P.castDone = false; P.inv = Math.max(P.inv, 1.7); flash(); sfx('super'); G.shake = .5; rumble(450, 1, 1);
   if (f.key === 'glenn') {
     banner('UNIFY!', 'Harald Bluetooth united Denmark. Glenn will settle for this room.', 2, 'team');
     P.castAt = .9; P.castDur = 1.35; oneShot(f, 'CombatStance', 1.35);
-    const u = G.unify = { x: clamp(P.x + Math.sin(P.yaw) * 2.8, -AX, AX), z: clamp(P.z + Math.cos(P.yaw) * 2.8, -AZ, AZ) };
+    let ux = P.x + Math.sin(P.yaw) * 2.8, uz = P.z + Math.cos(P.yaw) * 2.8;
+    if (M.on) { const dx = M.x - P.x, dz = M.z - P.z, d = Math.hypot(dx, dz) || 1, k = Math.min(1, 6.5 / d); ux = P.x + dx * k; uz = P.z + dz * k; if (d > .6) P.yaw = Math.atan2(dx, dz); }      // ground-targeted, within reach
+    const u = G.unify = { x: clamp(ux, -AX, AX), z: clamp(uz, -AZ, AZ), zap: 0 }; pulse(u.x, u.z, 0x6fb7ff, 5.5, .8);
+    sigil(u.x, u.z, 6.5, 3.4); sigil(u.x, u.z, 3.2, 3.4, 0xcfe9ff); sigil(P.x, P.z, 1.8, 1.4);                         // the circle goes down first
     P.castFn = () => {
-      G.unify = null; let n = 0;
-      for (const e of [...enemies]) if (Math.hypot(e.x - u.x, e.z - u.z) < (e.boss ? 9 : 5.5) + e.r) { bolt(P.x, 1.4, P.z, e.x, e.def.h * e.scale * .6, e.z); if (damageEnemy(e, e.boss ? 95 : 75, { x: u.x, z: u.z, kb: 14, heavy: true, pierce: true, stun: 1.2, word: 'UNIFIED' })) n++; }
-      pulse(u.x, u.z, 0x6fb7ff, 7, .5); pulse(u.x, u.z, 0xffffff, 5, .35); burst(u.x, 1, u.z, 0x6fb7ff, 30, 10); sfx('boom'); G.shake = .9; flash(); if (n) landed(true, n, 0);
+      G.unify = null; let n = 0; const hit = [];
+      for (const e of [...enemies]) if (Math.hypot(e.x - u.x, e.z - u.z) < (e.boss ? 9 : 5.5) + e.r) {
+        bolt(e.x + rand(-1.5, 1.5), 14, e.z + rand(-1, 1), e.x, e.def.h * e.scale * .6, e.z, 0xcfe9ff); bolt(P.x, 1.4, P.z, e.x, e.def.h * e.scale * .6, e.z);      // one from the sky, one from Glenn
+        if (damageEnemy(e, e.boss ? 95 : 75, { x: u.x, z: u.z, kb: 14, heavy: true, pierce: true, stun: 1.2, word: 'UNIFIED' })) { n++; hit.push(e); }
+      }
+      for (let i = 0; i < 3; i++) pulse(u.x, u.z, i ? 0x6fb7ff : 0xffffff, 4 + i * 2.5, .35 + i * .18);
+      burst(u.x, 1, u.z, 0x6fb7ff, 34, 10); burst(u.x, 2, u.z, 0xcfe9ff, 16, 7); sfx('boom'); sfx('thunder'); G.shake = .9; flash(); if (n) landed(true, n, 0);
+      pairUp(hit, 5); G.storm = { x: u.x, z: u.z, n: 7, cd: .3 };                                                       // everything left standing is paired, and the storm keeps going
     };
   } else {
-    banner('BEYOND 800mg', 'Coffee Guy has left the recommended daily limit. Time is a suggestion.', 2, 'cafe');
+    banner('BEYOND 800mg', 'Coffee Guy has spun up a fleet. Time is a suggestion; so is the bill.', 2, 'cafe');
     P.castAt = .25; P.castDur = .5; oneShot(f, 'CombatStance', .5);
     P.castFn = () => {
-      T.bt = 6.5; $('vfx').classList.add('bt'); pulse(P.x, P.z, 0xffb347, 6, .5); burst(P.x, 1, P.z, 0xc98a3a, 26, 9);
+      T.bt = 6.5; $('vfx').classList.add('bt'); pulse(P.x, P.z, 0xffb347, 6, .5); pulse(P.x, P.z, 0x58c7ff, 4, .4); burst(P.x, 1, P.z, 0xc98a3a, 26, 9);
       for (const e of [...enemies]) if (dP(e) < 5 + e.r) damageEnemy(e, 22, { kb: 12, heavy: true, pierce: true, word: 'JITTERS' });
+      spawnDrones(4, 6.5); spawnAgents(P.x, P.z, 6, 6.5);                                                               // escort drones overhead, agents on the floor
     };
   }
 }
@@ -955,16 +1123,20 @@ function tag(force) {
   T.tagCd = 1.6; P.inv = Math.max(P.inv, .6); P.root = P.rev = P.slow = 0;                   // tagging shakes off meetings, PIPs and prompt injections
   P.st = 'attack'; P.mv = MOVES.tag; P.t = 0; P.hitDone = false; P.lspd = 0; P.buf = null;
   oneShot(o, MOVES.tag.clip, MOVES.tag.dur); pulse(P.x, P.z, o.hex, 3.2, .35); sfx('tag'); floatText(`${o.name} TAGS IN`, P.x, 2.8, P.z, 'tag');
+  if (o.key === 'glenn') { bolt(P.x + rand(-1.5, 1.5), 14, P.z + rand(-1, 1), P.x, 1, P.z, 0xcfe9ff); sigil(P.x, P.z, 2.6, 1); sfx('thunder'); }      // Glenn arrives by lightning
+  else { burst(P.x, 1, P.z, 0xe9e2d0, 12, 4); if (!allies.some(a => a.kind === 'agent')) spawnAgents(P.x, P.z, 2, 3.5); }                              // Coffee Guy brings two interns
   return true;
 }
 function assist() {
   const o = team[1 - active]; if (o.ko || T.assistCd > 0 || G.assist) return;
   T.assistCd = perk('skip') ? 5.5 : 8.5;
   const side = P.yaw + Math.PI / 2, ax = clamp(P.x + Math.sin(side) * 1.4, -AX, AX), az = clamp(P.z + Math.cos(side) * 1.4, -AZ, AZ);
-  const tgt = nearestEnemy(ax, az, 12, P.yaw, 3.2), yaw = tgt ? Math.atan2(tgt.x - ax, tgt.z - az) : P.yaw;
+  let aim = null, yaw;
+  if (M.on) { const e = PAD.aim ? null : enemyAtCursor(); aim = e ? { x: e.x, z: e.z } : { x: M.x, z: M.z }; yaw = Math.atan2(aim.x - ax, aim.z - az); }
+  else { const tgt = nearestEnemy(ax, az, 12, P.yaw, 3.2); yaw = tgt ? Math.atan2(tgt.x - ax, tgt.z - az) : P.yaw; }
   o.g.visible = true; o.g.position.set(ax, 0, az); o.g.rotation.y = yaw; tint(o, 0xffffff);
   oneShot(o, o.key === 'glenn' ? 'CombatStance' : 'RightStraightPunch', .7);
-  G.assist = { f: o, t: 0, x: ax, z: az, yaw, done: false }; pulse(ax, az, o.hex, 2.4, .3); sfx('tag'); floatText(`${o.name}: ASSIST`, ax, 2.8, az, 'tag');
+  G.assist = { f: o, t: 0, x: ax, z: az, yaw, aim, done: false }; pulse(ax, az, o.hex, 2.4, .3); sfx('tag'); floatText(`${o.name}: ASSIST`, ax, 2.8, az, 'tag');
 }
 function jeremyZap() {
   const e = nearestEnemy(P.x, P.z, 12, 0, 4); if (!e) return;
@@ -972,21 +1144,23 @@ function jeremyZap() {
 }
 function act(a) {
   P.buf = null;
-  if (a === 'light') startMove('l1'); else if (a === 'heavy') startMove('h1');
+  if (a === 'light') startMove('l1', autoTgt()); else if (a === 'heavy') startMove('h1');
   else if (a === 'dodge') { if (P.dodgeCd <= 0 && P.root <= 0) startDodge(); }
   else if (a === 'special') startSpecial(); else if (a === 'super') startSuper(); else if (a === 'tag') tag(false); else if (a === 'assist') assist();
 }
 function press(a) {
   if (a === 'pause') return togglePause();
   if (G.mode !== 'play' || G.paused || P.st === 'ko') return;
-  P.buf = a; P.bufT = .24;
+  if (a === 'amove') return order(true);                  // A: attack-move to the cursor
+  if (a === 'stop') { P.order = null; return; }           // S: stand still
+  P.buf = a; P.bufT = .24; P.auto = false;
   if (P.root > 0 && (a === 'light' || a === 'heavy')) { P.root -= .32; if (P.root <= 0) floatText('DECLINED', P.x, 2.6, P.z, 'tag'); }       // mash to decline the meeting
 }
 function hurtPlayer(dmg, src = {}) {
   if (G.mode !== 'play' || P.st === 'ko' || G.phase === 'done') return false;
   if (P.inv > 0) { if (P.st === 'dodge' && !P.dodgeProc) { P.dodgeProc = true; floatText(pick(DODGE_WORDS), P.x, 2.6, P.z, 'tag'); addCaf(30); } return false; }
   const f = team[active], d = dmg * (f.pip > 0 ? 1.8 : 1) * (perk('sound') ? .85 : 1);
-  f.hp -= d; f.rec = Math.max(f.hp, f.rec - d * .45); f.flash = .18; G.stats.dmg += d;              // a little over half of every hit can be walked off on the bench
+  f.hp -= d; f.rec = Math.max(f.hp, f.rec - d * .45); f.flash = .18; G.stats.dmg += d; if (!src.soft) rumble(140, .7, .5);              // a little over half of every hit can be walked off on the bench
   if (src.effect === 'root') { P.root = 1.9; floatText('MEETING ACCEPTED', P.x, 2.9, P.z, 'bad'); }
   else if (src.effect === 'rev') { P.rev = 3.2; floatText('IGNORE PREVIOUS INSTRUCTIONS', P.x, 2.9, P.z, 'bad'); }
   else if (src.effect === 'slow') { P.slow = 2.4; floatText('CHILLED', P.x, 2.9, P.z, 'bad'); }
@@ -1015,21 +1189,39 @@ function updatePlayer(dt) {
   if (P.buf && (P.bufT -= dt) <= 0) P.buf = null;
   if (!o.ko && o.hp < o.rec) o.hp = Math.min(o.rec, o.hp + dt * (perk('bath') ? 7 : 3.5));
   if (perk('ai') && (T.aiT -= dt) <= 0) { T.aiT = 5; jeremyZap(); }
-  if (G.assist) { const a = G.assist; a.t += dt; if (!a.done && a.t > .22) { a.done = true; castSpecial(a.f, a.x, a.z, a.yaw); } if (a.t > .8) { burst(a.x, 1, a.z, a.f.hex, 8, 4); endAssist(); } }
+  if (G.assist) { const a = G.assist; a.t += dt; if (!a.done && a.t > .22) { a.done = true; castSpecial(a.f, a.x, a.z, a.yaw, a.aim); } if (a.t > .8) { burst(a.x, 1, a.z, a.f.hex, 8, 4); endAssist(); } }
+  if (G.unify && (G.unify.zap -= dt) <= 0) {                                         // while Glenn winds up, the circle reaches out and takes hold of them
+    const u = G.unify; u.zap = .11; const pool = enemies.filter(e => e.spawn <= 0 && Math.hypot(e.x - u.x, e.z - u.z) < 11);
+    if (pool.length) { const e = pick(pool); bolt(u.x, .3, u.z, e.x, e.def.h * e.scale * .5, e.z, 0x8fd0ff, 4); }
+  }
+  if (G.storm && (G.storm.cd -= dt) <= 0) {                                           // and afterwards the sky keeps picking robots off
+    const s = G.storm; s.cd = .3; const pool = enemies.filter(e => e.spawn <= 0 && Math.hypot(e.x - s.x, e.z - s.z) < 11);
+    if (pool.length) { const e = pick(pool); bolt(e.x + rand(-1.5, 1.5), 14, e.z + rand(-1, 1), e.x, e.def.h * e.scale * .5, e.z, 0xcfe9ff); pulse(e.x, e.z, 0x6fb7ff, 1.8, .25); sfx('thunder'); damageEnemy(e, 16, { x: e.x, z: e.z + 1, pierce: true, stun: .5, word: 'SIGNAL' }); }
+    if (--s.n <= 0) G.storm = null;
+  }
   if (G.boss && G.boss.pull > 0 && P.st !== 'ko') { const a = aP(G.boss) + Math.PI; P.x += Math.sin(a) * G.boss.pull * dt; P.z += Math.cos(a) * G.boss.pull * dt; }
-  const [ix, iz, moving] = inputDir();
+  if (M.on) { if (!PAD.aim) mouseGround(); if (M.rmb) order(false, false); }                        // holding the right button keeps steering
+  if (!P.buf && P.st !== 'ko') {                                                      // holding Q (or the left button) keeps jabbing; holding W keeps kicking
+    const h = keys.has('KeyQ') || M.lmb || PAD.hold === 'light' ? 'light' : keys.has('KeyW') || PAD.hold === 'heavy' ? 'heavy' : null; if (h) { P.buf = h; P.bufT = .1; P.auto = false; }
+  }
+  let [ix, iz, moving] = inputDir(), swing = null;
+  if (moving) P.order = null;                                                         // arrow keys or the stick take over from any order
+  else if (P.st === 'free' || P.st === 'attack') { const w = followOrder(); if (w) { if (w.hit) swing = w.hit; else { ix = w.x; iz = w.z; moving = true; } } }
   if (P.st === 'free') {
     const sp = f.speed * (perk('desk') ? 1.12 : 1) * (P.slow > 0 ? .55 : 1) * (T.bt > 0 ? 1.25 : 1);
     if (moving && P.root <= 0) { P.x += ix * sp * dt; P.z += iz * sp * dt; P.yaw += clamp(angDiff(Math.atan2(ix, iz), P.yaw), -16 * dt, 16 * dt); loopClip(f, 'Run', sp / 3.3); } else loopClip(f, 'Idle');
+    if (swing && !P.buf) { P.buf = 'light'; P.bufT = .1; P.auto = true; }             // in reach of the robot you were sent after: auto-attack
     if (P.buf) act(P.buf);
   } else if (P.st === 'attack') {
     const m = P.mv; P.t += dt * atkRate(f); const k = P.t / m.dur;
     if (k < m.hit) { P.x += Math.sin(P.yaw) * P.lspd * dt * atkRate(f); P.z += Math.cos(P.yaw) * P.lspd * dt * atkRate(f); }
     if (!P.hitDone && k >= m.hit) { P.hitDone = true; doStrike(m); }
+    const ot = P.order && P.order.t === 'atk' && P.order.e.alive ? P.order.e : null;
+    if (!P.buf && P.hitDone && ot && Math.hypot(ot.x - P.x, ot.z - P.z) - ot.r < 2.2) { P.buf = 'light'; P.bufT = .1; P.auto = true; }      // and keep the combo going
     const b = P.buf;
     if (b === 'dodge' && P.dodgeCd <= 0 && P.root <= 0) { P.st = 'free'; act(b); }
     else if (P.hitDone && b && k >= m.hit + .12) {
-      if (b === 'light' && m.next) { P.buf = null; startMove(m.next); }
+      if (b === 'light' && m.next) { P.buf = null; startMove(m.next, autoTgt()); }
       else if (b === 'heavy' && m.fin) { P.buf = null; startMove(m.fin); }
       else if (b === 'tag' || b === 'special' || b === 'super' || b === 'assist') { P.st = 'free'; act(b); }
     }
@@ -1043,6 +1235,9 @@ function updatePlayer(dt) {
   }
   P.x = clamp(P.x, -AX, AX); P.z = clamp(P.z, -AZ, AZ);
   f = team[active]; f.g.position.set(P.x, 0, P.z); f.g.rotation.y = P.yaw;
+  const od = P.order; tgtRing.visible = !!(od && od.t === 'atk' && od.e.alive); dstRing.visible = !!(od && od.t !== 'atk');      // show what you were told to do
+  if (tgtRing.visible) { tgtRing.position.set(od.e.x, .11, od.e.z); tgtRing.scale.setScalar((od.e.r + .35) * (1 + .06 * Math.sin(G.time * 9))); }
+  if (dstRing.visible) { dstRing.position.set(od.x, .11, od.z); dstRing.scale.setScalar(.45); }
   tint(f, f.flash > 0 ? 0xff5a5a : f.pip > 0 && (G.time * 6 | 0) % 2 ? 0xff9ad1 : P.st === 'dodge' ? 0x9fd4ff : P.root > 0 ? 0xa8a8a8 : P.rev > 0 ? 0x9dff9d : P.slow > 0 ? 0xa8d8ff : T.bt > 0 ? 0xffdca8 : 0xffffff);
 }
 
@@ -1107,6 +1302,7 @@ function resetField() {
   T.tagCd = T.assistCd = T.bt = 0; $('vfx').classList.remove('bt'); G.hitstop = G.slowmo = G.shake = 0;
 }
 function pose(mode) {                                     // where the two of them stand when nobody is fighting
+  P.order = null; P.auto = false; M.rmb = M.lmb = false; tgtRing.visible = dstRing.visible = false;
   team.forEach((f, i) => {
     tint(f, 0xffffff); loopClip(f, 'Idle');
     if (mode === 'title') { f.g.visible = true; f.g.position.set(4.4 + i * 2.3, 0, 2.4 + i * .6); f.g.rotation.y = -.3 - i * .2; }
@@ -1120,13 +1316,16 @@ function showTitle() {
     <p>MEGACORP went AI-native overnight. Nobody tested it. Tag in, tag out, and clear eight floors of rogue office AI, from the standup bot to the CEO’s AI clone. Jeremy, the AI bot from the last job, is keeping score. He is on your side. He still does not round up.</p>
     <h3>How to fight</h3>
     <div class="keys">
-      <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span>Move. <kbd>Space</kbd> dodges, and nothing can hit you mid-dodge.</span>
-      <span><kbd>J</kbd> <kbd>K</kbd></span><span>Jab (four-hit combo) and kick. Kick after two jabs for a roundhouse.</span>
-      <span><kbd>L</kbd></span><span>Special. Glenn pairs robots together and stuns them; Coffee Guy throws a scalding espresso.</span>
-      <span><kbd>Q</kbd></span><span>Tag your partner in. The one on the bench recovers morale, and tagging shakes off meetings, PIPs and prompt injections.</span>
-      <span><kbd>E</kbd></span><span>Assist: your partner jumps in for one move.</span>
-      <span><kbd>F</kbd></span><span>Super, once caffeine reaches 800mg.</span>
+      <span><b>Right-click</b></span><span>Move there. Right-click a robot to walk over and keep hitting it. Hold the button to steer. Everything aims at the cursor.</span>
+      <span><kbd>Q</kbd> <kbd>W</kbd></span><span>Jab (four-hit combo, hold to keep going) and kick. Kick after two jabs for a roundhouse.</span>
+      <span><kbd>E</kbd></span><span>Special. Glenn pairs robots with Bluetooth: stunned, tethered, and sharing every hit. Coffee Guy sends a delivery drone that drops a scalding espresso and a swarm of AI agents where you point.</span>
+      <span><kbd>R</kbd></span><span>Super, once caffeine reaches 800mg. Glenn calls down a rune storm; Coffee Guy spins up a fleet of drones and agents.</span>
+      <span><kbd>D</kbd></span><span>Dodge toward the cursor. Nothing can hit you mid-dodge.</span>
+      <span><kbd>F</kbd> <kbd>G</kbd></span><span>Tag your partner in, or call them for a one-move assist. The one on the bench recovers morale, and tagging shakes off meetings, PIPs and prompt injections.</span>
+      <span><kbd>A</kbd> <kbd>S</kbd></span><span>Attack-move to the cursor, and stop.</span>
     </div>
+    <p><small>No mouse? The arrow keys move, and <kbd>Space</kbd> also dodges. <kbd>P</kbd> pauses.</small></p>
+    <p><small><b>Controller</b> (Xbox or PlayStation, plug in and press a button): left stick moves, right stick aims · <kbd>X</kbd>/<kbd>□</kbd> jab · <kbd>Y</kbd>/<kbd>△</kbd> kick · <kbd>B</kbd>/<kbd>○</kbd> special · <kbd>A</kbd>/<kbd>✕</kbd> dodge · <kbd>RB</kbd>/<kbd>R1</kbd> tag · <kbd>LB</kbd>/<kbd>L1</kbd> assist · <kbd>RT</kbd>/<kbd>R2</kbd> super. In menus <kbd>A</kbd>/<kbd>✕</kbd> confirms and <kbd>Y</kbd>/<kbd>△</kbd> starts the endless backlog.</small></p>
     <p class="rot">On a phone, turn it sideways first. This is a landscape kind of fight.</p>
     <div class="row"><button class="go" data-act="enter" id="go">Start: eight levels (Enter)</button><button data-act="b">Endless backlog (B)</button></div>
     <div class="row" style="margin-top:10px">${best}<small>A companion to <a href="https://rayhe.net/glenntooth/" target="_blank" rel="noopener">Glenntooth the UniFier</a>. <kbd>M</kbd> mutes.</small></div>`,
@@ -1157,7 +1356,9 @@ function beginLevel() {
   G.hpScale = 1 + G.level * .1; G.dmgScale = 1 + G.level * .07; G.atkGap = Math.max(.3, .95 - G.level * .08); G.cap = 6 + (G.level >> 1);
   $('lvl').textContent = `Level ${G.level + 1}/8 · ${L.room}`; hudF[0].small.textContent = GTITLE[G.level];
   G.phase = 'waves'; G.wave = -1; G.gap = .6;
-  if (G.level === 0) toast('<b>Jeremy (AI bot):</b> jab with <kbd>J</kbd>, dodge with <kbd>Space</kbd>, and tag with <kbd>Q</kbd> before one of you runs out of morale. I will be counting.', 7);
+  if (G.level === 0) toast(G.input === 'pad'
+    ? `<b>Jeremy (AI bot):</b> left stick moves, <kbd>${K('light')}</kbd> jabs, <kbd>${K('dodge')}</kbd> dodges, and <kbd>${K('tag')}</kbd> tags before one of you runs out of morale. I will be counting.`
+    : '<b>Jeremy (AI bot):</b> right-click to move, right-click a robot to keep hitting it. <kbd>D</kbd> dodges toward the cursor, and <kbd>F</kbd> tags before one of you runs out of morale. I will be counting.', 7);
 }
 function queueWave(list) { const q = []; for (const [t, n] of list) for (let i = 0; i < n; i++) q.push(t); G.queue = shuffle(q); G.spawnT = .5; }
 function endlessList(n) {
@@ -1229,7 +1430,7 @@ function gameOver() {
   if (G.story) {
     store.set({ best: Math.max(s.best || 0, T.pc) }); const L = LEVELS[G.level];
     card(`<div class="kick">Level ${G.level + 1} · ${L.room}</div><h2>You have been moved to Special Projects.</h2><p>Unkillable. Unpromotable. In this case, also unconscious.</p>
-      <p><small>Jeremy (AI bot): “Per my last email: <kbd>Space</kbd> dodges, and a partner on the bench gets morale back. Tag more.”</small></p>
+      <p><small>Jeremy (AI bot): “Per my last email: <kbd>${K('dodge')}</kbd> dodges, and a partner on the bench gets morale back. Tag more, with <kbd>${K('tag')}</kbd>.”</small></p>
       <div class="row"><button class="go" data-act="enter">Retry this level (Enter)</button><button data-act="esc">Title (Esc)</button></div>`, { enter: showIntro, esc: showTitle });
   } else {
     const n = Math.max(0, G.endless.wave - 1); store.set({ best: Math.max(s.best || 0, T.pc), wave: Math.max(s.wave || 0, n) });
@@ -1244,15 +1445,17 @@ function togglePause() { if (G.mode !== 'play') return; G.paused = !G.paused; $(
 const setT = (el, t) => { if (el._t !== t) el.textContent = el._t = t; };
 const setC = (el, c) => { if (el._c !== c) el.className = el._c = c; };
 const setW = (el, v) => { const w = Math.round(clamp(v, 0, 1) * 1000) / 10; if (el._w !== w) { el._w = w; el.style.width = w + '%'; } };
-function chip(el, frac, state) { setC(el, 'cd ' + state); const h = Math.round(clamp(frac, 0, 1) * 100); if (el._h !== h) { el._h = h; el.lastElementChild.style.height = h + '%'; } }
+function chip(el, frac, state) { setC(el, el.dataset.c + ' ' + state); const h = Math.round(clamp(frac, 0, 1) * 100); if (el._h !== h) { el._h = h; el.lastElementChild.style.height = h + '%'; } }
 function updateHud() {
   if (G.mode !== 'play') return;
   team.forEach((f, i) => { const h = hudF[i]; setC(h.root, 'fighter' + (i === active ? ' on' : '') + (f.ko ? ' ko' : '') + (f.pip > 0 ? ' pip' : '')); setW(h.hp, f.hp / f.maxHp); setW(h.rec, f.rec / f.maxHp); });
   const f = team[active], o = team[1 - active], tier = cafTier();
   setW($('cafFill'), T.caf / 800); setT($('cafMg'), Math.round(T.caf) + 'mg'); setT($('cafTier'), `${tier[1]} · damage ×${tier[2].toFixed(2)}`); setC($('caf'), T.caf >= 800 ? 'full' : '');
   const spMax = f.spMax * (perk('rfc') ? .7 : 1);
-  chip($('cdSp'), f.spCd / spMax, f.spCd <= 0 ? 'ready' : ''); chip($('cdTag'), T.tagCd / 1.6, o.ko ? 'off' : T.tagCd <= 0 ? 'ready' : '');
-  chip($('cdAs'), T.assistCd / (perk('skip') ? 5.5 : 8.5), o.ko ? 'off' : T.assistCd <= 0 ? 'ready' : ''); chip($('cdSu'), 1 - T.caf / 800, T.caf >= 800 ? 'hot' : '');
+  chip($('abQ'), 0, 'ready'); chip($('abW'), 0, 'ready'); chip($('abE'), f.spCd / spMax, f.spCd <= 0 ? 'ready' : ''); chip($('abR'), 1 - T.caf / 800, T.caf >= 800 ? 'hot' : '');
+  chip($('abD'), P.dodgeCd / .55, P.dodgeCd <= 0 && P.root <= 0 ? 'ready' : ''); chip($('abF'), T.tagCd / 1.6, o.ko ? 'off' : T.tagCd <= 0 ? 'ready' : '');
+  chip($('abG'), T.assistCd / (perk('skip') ? 5.5 : 8.5), o.ko ? 'off' : T.assistCd <= 0 ? 'ready' : '');
+  setT($('abE').children[1], f.key === 'glenn' ? 'Pair' : 'Agents'); setT($('abR').children[1], f.key === 'glenn' ? 'Unify' : 'Swarm');
   setT($('pc').lastElementChild, String(T.pc));
   const cb = $('combo'); if (P.combo >= 2) { let rk = ''; for (const [n, w] of COMBO_RANKS) if (P.combo >= n) rk = w; const k = P.combo + '|' + rk; if (cb._k !== k) { cb._k = k; cb.innerHTML = `<b>${P.combo} HITS</b><span>${rk}</span>`; } } else if (cb._k) { cb._k = ''; cb.innerHTML = ''; }
   const b = G.boss;
@@ -1260,7 +1463,7 @@ function updateHud() {
     setC($('bossbar'), 'panel on' + (b.vuln > 0 || b.open > 0 ? ' vuln' : '')); setT($('bossName'), b.def.name); setW($('bossFill'), b.hp / b.maxHp);
     setT($('bossSub'), b.type === 'ceo' ? `Slide ${clamp(13 - Math.ceil(12 * b.hp / b.maxHp), 1, 12)} of 12 · ${['Vision 2.0', '3 AM Tweet', 'AI-Native Everything'][b.phase - 1]}` : b.vuln > 0 ? 'Restarting: vulnerable' : b.open > 0 ? 'Guard down: vulnerable' : b.def.sub);
   } else setC($('bossbar'), 'panel');
-  setT($('status'), f.pip > 0 ? 'ON A PIP: nearly double damage. Tag out (Q)!' : P.root > 0 ? 'IN A MEETING: mash J to decline, or tag out' : P.rev > 0 ? 'PROMPT INJECTED: controls reversed' : P.slow > 0 ? 'CHILLED: moving slowly' : T.bt > 0 ? `BEYOND 800mg · ${T.bt.toFixed(1)}s` : '');
+  setT($('status'), f.pip > 0 ? `ON A PIP: nearly double damage. Tag out (${K('tag')})!` : P.root > 0 ? `IN A MEETING: mash ${K('light')} to decline, or tag out (${K('tag')})` : P.rev > 0 ? 'PROMPT INJECTED: controls reversed' : P.slow > 0 ? 'CHILLED: moving slowly' : T.bt > 0 ? `BEYOND 800mg · ${T.bt.toFixed(1)}s` : '');
 }
 function updateCamera(dt) {
   const narrow = camera.aspect < 1, k = clamp(1.5 / camera.aspect, 1, 1.7), tx = G.mode === 'play' ? (narrow ? clamp(P.x * .95, -10, 10) : clamp(P.x * .68, -6.5, 6.5)) : narrow ? 5 : 0; G.camX += (tx - G.camX) * Math.min(1, dt * 4);
@@ -1269,10 +1472,13 @@ function updateCamera(dt) {
 }
 
 // ------------------------------------------------------------------ input
-const ACT = { KeyJ: 'light', KeyZ: 'light', KeyK: 'heavy', KeyX: 'heavy', KeyL: 'special', KeyC: 'special', Space: 'dodge', ShiftLeft: 'dodge', KeyQ: 'tag', Tab: 'tag', KeyE: 'assist', KeyF: 'super', KeyR: 'super' };
+// MOBA layout: the left hand stays on QWERT / ASDFG and the mouse moves and aims.
+//   Q jab · W kick · E special · R super (the ult) · T tag (same as F)
+//   A attack-move · S stop · D dodge · F tag · G assist          Space also dodges; arrow keys still move.
+const ACT = { KeyQ: 'light', KeyW: 'heavy', KeyE: 'special', KeyR: 'super', KeyT: 'tag', KeyA: 'amove', KeyS: 'stop', KeyD: 'dodge', KeyF: 'tag', KeyG: 'assist', Space: 'dodge' };
 addEventListener('keydown', e => {
   if (['Tab', 'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
-  initAudio(); if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+  initAudio(); if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return; useDevice('kbm');
   if (e.code === 'KeyM') return toggleMute();
   if (G.card) {
     const k = e.code === 'Enter' || e.code === 'NumpadEnter' ? 'enter' : e.code === 'Escape' ? 'esc' : e.code.startsWith('Digit') ? e.code.slice(5) : e.code.startsWith('Key') ? e.code.slice(3).toLowerCase() : '';
@@ -1280,11 +1486,19 @@ addEventListener('keydown', e => {
   }
   if (G.mode !== 'play') return;
   if (e.code === 'KeyP' || e.code === 'Escape') return togglePause();
-  keys.add(e.code); if (ACT[e.code]) press(ACT[e.code]);
+  keys.add(e.code); if (e.code.startsWith('Arrow')) M.on = false;      // steering by keyboard: stop aiming at a cursor nobody is using
+  if (ACT[e.code]) press(ACT[e.code]);
 });
 addEventListener('keyup', e => keys.delete(e.code));
-addEventListener('blur', () => keys.clear());
-$('c').addEventListener('pointerdown', e => { initAudio(); if (e.pointerType === 'mouse') press(e.button === 2 ? 'heavy' : 'light'); });
+addEventListener('blur', () => { keys.clear(); M.rmb = M.lmb = false; });
+const mouseAt = e => { M.on = true; M.sx = e.clientX; M.sy = e.clientY; };
+addEventListener('pointermove', e => { if (e.pointerType === 'mouse' && G.input !== 'pad') mouseAt(e); });       // while a controller is in use, a nudged mouse does not take over
+addEventListener('pointerup', e => { if (e.pointerType !== 'mouse') return; if (e.button === 2) M.rmb = false; else if (e.button === 0) M.lmb = false; });
+$('c').addEventListener('pointerdown', e => {              // right button: move there, or attack what is under the cursor. Left button: jab toward the cursor
+  initAudio(); if (e.pointerType !== 'mouse') return; useDevice('kbm'); mouseAt(e);
+  try { $('c').setPointerCapture(e.pointerId); } catch { /* not capturable */ }
+  if (e.button === 2) { M.rmb = true; order(false); } else if (e.button === 0) { M.lmb = true; mouseGround(); press('light'); }
+});
 $('c').addEventListener('contextmenu', e => e.preventDefault());
 if (matchMedia('(pointer: coarse)').matches) {              // phones and tablets: a thumbstick on the left, buttons on the right
   $('touch').className = 'on'; const st = $('stick'), nub = $('nub'); let id = null, sx = 0, sy = 0;
@@ -1295,10 +1509,60 @@ if (matchMedia('(pointer: coarse)').matches) {              // phones and tablet
   for (const b of $('tb').children) b.addEventListener('pointerdown', e => { e.preventDefault(); initAudio(); press(b.dataset.a); });
 }
 
+// ------------------------------------------------------------------ controllers: Xbox and PlayStation pads, read through the browser's standard mapping
+//   left stick / d-pad move · right stick aim · X/□ jab · Y/△ kick · B/○ special (also LT/L2) · A/✕ dodge
+//   RB/R1 tag · LB/L1 assist · RT/R2 super · Menu/Options pause.   In menus: A/✕ confirm, B/○ back, Y/△ endless, d-pad picks a perk.
+const KEYS = { light: 'Q', heavy: 'W', special: 'E', super: 'R', dodge: 'D', tag: 'F', assist: 'G' };
+const PADS = { xbox: { light: 'X', heavy: 'Y', special: 'B', super: 'RT', dodge: 'A', tag: 'RB', assist: 'LB', pause: 'Menu' }, ps: { light: '□', heavy: '△', special: '○', super: 'R2', dodge: '✕', tag: 'R1', assist: 'L1', pause: 'Options' } };
+const PAD = { idx: -1, kind: 'xbox', prev: [], x: 0, y: 0, aim: false, hold: null, nav: 0, sel: 0 };
+const HINT_KBM = $('hint').innerHTML;
+const K = a => G.input === 'pad' ? PADS[PAD.kind][a] : KEYS[a];           // what a button is called in on-screen hints, for whichever device was touched last
+function useDevice(d) {                                   // swap every on-screen label between keyboard keys and controller glyphs
+  if (G.input === d) return; G.input = d; document.body.dataset.input = d;
+  if (d === 'pad') { M.on = M.rmb = M.lmb = false; P.order = null; }
+  const L = d === 'pad' ? PADS[PAD.kind] : KEYS;
+  for (const [id, a] of [['abQ', 'light'], ['abW', 'heavy'], ['abE', 'special'], ['abR', 'super'], ['abD', 'dodge'], ['abF', 'tag'], ['abG', 'assist']]) $(id).firstElementChild.textContent = L[a];
+  $('hint').innerHTML = d === 'pad' ? `<b>Left stick</b> move · <b>right stick</b> aim · <kbd>${L.pause}</kbd> pause` : HINT_KBM;
+  padPick();
+}
+function padPick() { [...$('cardIn').querySelectorAll('.perks button')].forEach((b, i) => b.classList.toggle('sel', G.input === 'pad' && i === PAD.sel)); }      // highlight the perk the d-pad is on
+function rumble(ms, strong = .6, weak = .4) {
+  try { const gp = PAD.idx >= 0 && G.input === 'pad' && navigator.getGamepads()[PAD.idx]; if (gp && gp.vibrationActuator && gp.vibrationActuator.playEffect) gp.vibrationActuator.playEffect('dual-rumble', { duration: ms, strongMagnitude: strong, weakMagnitude: weak }); } catch { /* this pad does not rumble */ }
+}
+function pollPad() {
+  let gp = null; try { for (const p of (navigator.getGamepads ? navigator.getGamepads() : [])) if (p && p.connected && p.buttons.length >= 10) { gp = p; break; } } catch { return; }
+  if (!gp) { if (PAD.idx >= 0) { PAD.idx = -1; PAD.x = PAD.y = 0; PAD.hold = null; if (PAD.aim) { PAD.aim = false; M.on = false; } useDevice('kbm'); toast('Controller disconnected.', 2.5); } return; }
+  if (PAD.idx !== gp.index) {
+    PAD.idx = gp.index; PAD.prev = []; PAD.kind = /054c|dualsense|dualshock|playstation|ps[345]|wireless controller/i.test(gp.id) ? 'ps' : 'xbox';
+    toast(`<b>Controller connected</b> (${PAD.kind === 'ps' ? 'PlayStation' : 'Xbox'} layout). Press any button to use it.`, 4);
+  }
+  const b = gp.buttons.map(q => q.pressed || q.value > .5), down = i => b[i] && !PAD.prev[i], dz = v => Math.abs(v) < .22 ? 0 : v;
+  let x = dz(gp.axes[0] || 0), y = dz(gp.axes[1] || 0); const rx = dz(gp.axes[2] || 0), ry = dz(gp.axes[3] || 0);
+  if (b[14]) x = -1; else if (b[15]) x = 1; if (b[12]) y = -1; else if (b[13]) y = 1;
+  if (b.some(Boolean) || x || y || rx || ry) { initAudio(); useDevice('pad'); }
+  if (G.input !== 'pad') { PAD.x = PAD.y = 0; PAD.hold = null; PAD.prev = b; return; }       // plugged in but the keyboard was used last: leave it alone
+  PAD.x = x; PAD.y = y;
+  if (rx || ry) { PAD.aim = true; M.on = true; M.x = P.x + rx * 6.5; M.z = P.z + ry * 6.5; } else if (PAD.aim) { PAD.aim = false; M.on = false; }      // the right stick stands in for the cursor
+  if (G.card) {
+    const c = G.card, nums = ['1', '2', '3'].filter(k => c[k]), nav = x < -.5 ? -1 : x > .5 ? 1 : 0; let fn = null;
+    if (nums.length) { if (nav && nav !== PAD.nav) { PAD.sel = clamp(PAD.sel + nav, 0, nums.length - 1); sfx('ui'); padPick(); } if (down(0)) fn = c[nums[clamp(PAD.sel, 0, nums.length - 1)]]; }
+    else fn = (down(0) || down(9)) ? c.enter : down(3) ? c.b : down(1) ? c.esc : null;
+    PAD.nav = nav; PAD.hold = null; if (fn) { sfx('ui'); PAD.prev = b; fn(); return; }
+  } else if (G.mode === 'play') {
+    if (down(9)) togglePause();
+    else if (!G.paused) {
+      if (down(2)) press('light'); if (down(3)) press('heavy'); if (down(0)) press('dodge'); if (down(1) || down(6)) press('special');
+      if (down(7)) press('super'); if (down(5)) press('tag'); if (down(4)) press('assist');
+      PAD.hold = b[2] ? 'light' : b[3] ? 'heavy' : null;                                     // hold to keep swinging
+    }
+  }
+  PAD.prev = b;
+}
+
 // ------------------------------------------------------------------ main loop
 let last = performance.now();
 function frame(now) {
-  requestAnimationFrame(frame);
+  requestAnimationFrame(frame); pollPad();
   const real = Math.min(.05, (now - last) / 1000); last = now;
   if (bannerT > 0 && (bannerT -= real) <= 0) $('banner').className = '';
   if (toastT > 0 && (toastT -= real) <= 0) $('toast').className = 'panel';
@@ -1312,10 +1576,10 @@ function sim(real) {                                      // one tick of the gam
     else {
       G.time += real; if (G.slowmo > 0) { G.slowmo -= real; dt *= .3; }
       if (G.hitstop > 0) { G.hitstop -= real; dt = 0; }
-      if (dt > 0) { const eDt = dt * (T.bt > 0 ? .3 : 1); updatePlayer(dt); updateEnemies(eDt, dt); updateHazards(eDt); updateZones(eDt); updateShots(eDt, dt); updateRings(eDt); updateBeams(eDt); updatePickups(dt); updateFlow(dt); }
+      if (dt > 0) { const eDt = dt * (T.bt > 0 ? .3 : 1); updatePlayer(dt); updateAllies(dt); updateEnemies(eDt, dt); updateHazards(eDt); updateZones(eDt); updateShots(eDt, dt); updateRings(eDt); updateBeams(eDt); updatePickups(dt); updateFlow(dt); }
     }
   }
-  if (!G.paused) { for (const f of team) f.mixer.update(dt); updateFx(real); updateBubbles(real); }
+  if (!G.paused) { for (const f of team) f.mixer.update(dt); updateFx(real); updateMagic(real); updateAuras(real); updateBubbles(real); }
 }
 
 // ------------------------------------------------------------------ boot
@@ -1326,4 +1590,4 @@ Promise.all(FDEF.map(loadFighter)).then(fs => {
   team.push(...fs); fs.forEach((f, i) => { hudF[i].img.src = portrait(f); });
   showTitle(); requestAnimationFrame(frame);
 }).catch(err => { console.error(err); $('cardIn').innerHTML = `<h2>The tag team did not load.</h2><p>${String(err.message || err)}</p><p><small>This page needs to be served over http(s) with <code>assets/glenn.glb</code> and <code>assets/coffee.glb</code> next to it.</small></p>`; });
-window.PMLP = { G, T, P, team, enemies, hazards, shots, rings, beams, zones, pickups, keys, touch, LEVELS, BOTS, press, sim, spawnEnemy, damageEnemy, get active() { return active; } };      // for poking at it from the console
+window.PMLP = { G, T, P, M, team, enemies, hazards, shots, rings, beams, zones, pickups, keys, touch, LEVELS, BOTS, PAD, press, order, sim, pollPad, toScreen, spawnEnemy, damageEnemy, get active() { return active; } };      // for poking at it from the console

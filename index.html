@@ -51,13 +51,23 @@ kbd { display: inline-block; min-width: 1.5em; padding: 0 .35em; border: 1px sol
 @keyframes glow { to { filter: brightness(1.5); } }
 #cafTxt { display: flex; justify-content: space-between; font-size: 11px; color: var(--dim); margin-top: 3px; }
 #cafTxt b { color: var(--ink); }
-#cds { display: flex; gap: 6px; margin: 8px 6px 2px; }
-.cd { position: relative; flex: 1; padding: 4px 2px; border: 1px solid var(--line); border-radius: 8px; text-align: center; font-size: 10px; color: var(--dim); overflow: hidden; }
-.cd kbd { display: block; margin: 0 auto 2px; width: 1.9em; }
-.cd i { position: absolute; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, .6); height: 0; }
-.cd.ready { color: var(--ink); border-color: rgba(255, 255, 255, .35); }
-.cd.hot { color: #1b1300; background: var(--g); border-color: var(--g); font-weight: 700; animation: glow .5s infinite alternate; }
-.cd.off { opacity: .3; }
+/* the ability bar: Q W E R, then the D F G utility keys, the way a MOBA lays them out */
+#bar { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); padding: 8px 10px 6px; text-align: center; }
+#abs { display: flex; gap: 6px; align-items: flex-end; justify-content: center; }
+.ab { position: relative; width: 60px; height: 60px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255, 255, 255, .05); font-size: 10px; color: var(--dim); overflow: hidden; }
+.ab kbd { font-size: 15px; min-width: 1.7em; }
+.ab.sm { width: 48px; height: 48px; gap: 1px; font-size: 9px; }
+.ab.sm kbd { font-size: 12px; }
+.ab i { position: absolute; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, .64); height: 0; }
+.ab.ready { color: var(--ink); border-color: rgba(255, 255, 255, .35); }
+.ab.hot { color: #1b1300; background: var(--g); border-color: var(--g); font-weight: 700; animation: glow .5s infinite alternate; }
+.ab.hot kbd { color: #1b1300; border-color: rgba(0, 0, 0, .4); }
+.ab.off { opacity: .3; }
+#abs .gap { width: 8px; }
+#hint { margin-top: 5px; font-size: 11px; color: var(--dim); white-space: nowrap; }
+#hint b { color: var(--ink); font-weight: 600; }
+body[data-mode="play"] #c { cursor: crosshair; }
+@media (pointer: coarse) { #bar { display: none; } }
 #mid { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); width: min(46vw, 560px); text-align: center; }
 #tick { display: block; width: fit-content; margin: 0 auto; padding: 5px 14px; border-radius: 10px; background: rgba(12, 16, 26, .78); border: 1px solid var(--line); }
 #lvl { font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: var(--dim); }
@@ -77,7 +87,7 @@ kbd { display: inline-block; min-width: 1.5em; padding: 0 .35em; border: 1px sol
 #combo b { display: block; font-size: 22px; color: var(--g); line-height: 1.1; }
 #combo span { font-size: 11px; letter-spacing: .12em; color: var(--c); }
 #perks { margin-top: 4px; font-size: 16px; letter-spacing: 2px; }
-#help { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); padding: 6px 12px; font-size: 12px; color: var(--dim); white-space: nowrap; }
+
 #pause { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; flex-direction: column; background: rgba(5, 8, 14, .72); text-align: center; }
 #pause.on { display: flex; }
 #pause h2 { font-size: 40px; letter-spacing: .14em; }
@@ -105,7 +115,7 @@ kbd { display: inline-block; min-width: 1.5em; padding: 0 .35em; border: 1px sol
 #banner.boss h1 { color: #ffd9d9; }
 #banner.team h1 { color: var(--g); }
 #banner.cafe h1 { color: #ffd08a; }
-#toast { position: fixed; left: 50%; bottom: 54px; transform: translateX(-50%); max-width: min(92vw, 640px); padding: 8px 14px; font-size: 13px; opacity: 0; transition: opacity .3s; pointer-events: none; text-align: center; }
+#toast { position: fixed; left: 50%; bottom: 122px; transform: translateX(-50%); max-width: min(92vw, 640px); padding: 8px 14px; font-size: 13px; opacity: 0; transition: opacity .3s; pointer-events: none; text-align: center; }
 #toast.on { opacity: 1; }
 #toast b { color: var(--ok); }
 
@@ -144,7 +154,8 @@ button:disabled { opacity: .5; cursor: default; }
 .stats small { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; }
 .perks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 6px; }
 .perks button { text-align: left; font-weight: 400; padding: 12px; display: block; }
-.perks button:hover { border-color: var(--g); }
+.perks button:hover, .perks button.sel { border-color: var(--g); }
+.perks button.sel { box-shadow: 0 0 0 2px rgba(255, 179, 71, .55) inset; background: rgba(255, 179, 71, .12); }
 .perks .ic { font-size: 24px; }
 .perks b { display: block; margin: 4px 0 2px; }
 .perks small { display: block; line-height: 1.3; }
@@ -162,9 +173,9 @@ body[data-mode="play"] #touch.on { display: block; }
 #tb button { height: 58px; padding: 0; border-radius: 50%; font-size: 11px; background: rgba(20, 26, 40, .7); touch-action: none; }
 #tb .a { background: rgba(255, 179, 71, .8); color: #1b1300; }
 @media (max-width: 860px) {
-  #team { width: 212px; padding: 6px; } .fighter small { display: none; } .fighter.on img { width: 44px; height: 44px; } #cafTier { display: none; } #help { display: none; } #right { min-width: 0; padding: 6px 10px; } #pc b { font-size: 18px; } #combo b { font-size: 17px; }
+  #team { width: 212px; padding: 6px; } .fighter small { display: none; } .fighter.on img { width: 44px; height: 44px; } #cafTier { display: none; } #hint { display: none; } .ab { width: 50px; height: 50px; } .ab.sm { width: 42px; height: 42px; } #right { min-width: 0; padding: 6px 10px; } #pc b { font-size: 18px; } #combo b { font-size: 17px; }
   #mid { top: 196px; width: 92vw; }
-  @media (orientation: landscape) { #mid { top: 8px; left: 58%; width: 44vw; } #cds { display: none; } } .perks, .stats { grid-template-columns: 1fr 1fr; } #cardIn { padding: 16px; } #card.left { padding-left: 16px; }
+  @media (orientation: landscape) { #mid { top: 8px; left: 58%; width: 44vw; } } .perks, .stats { grid-template-columns: 1fr 1fr; } #cardIn { padding: 16px; } #card.left { padding-left: 16px; }
 }
 </style>
 </head>
@@ -177,12 +188,6 @@ body[data-mode="play"] #touch.on { display: block; }
     <div class="fighter" id="f0"><img alt=""><div><b></b><small></small><div class="bar"><i class="rec"></i><i class="hp"></i></div></div></div>
     <div class="fighter" id="f1"><img alt=""><div><b></b><small></small><div class="bar"><i class="rec"></i><i class="hp"></i></div></div></div>
     <div id="caf"><div class="bar"><i id="cafFill"></i></div><div id="cafTxt"><span>CAFFEINE <b id="cafMg">0mg</b></span><span id="cafTier"></span></div></div>
-    <div id="cds">
-      <div class="cd" id="cdSp"><kbd>L</kbd><span>Special</span><i></i></div>
-      <div class="cd" id="cdTag"><kbd>Q</kbd><span>Tag</span><i></i></div>
-      <div class="cd" id="cdAs"><kbd>E</kbd><span>Assist</span><i></i></div>
-      <div class="cd" id="cdSu"><kbd>F</kbd><span>Super</span><i></i></div>
-    </div>
   </div>
   <div id="mid">
     <div id="tick"><div id="lvl"></div><div id="wave"></div></div>
@@ -190,7 +195,19 @@ body[data-mode="play"] #touch.on { display: block; }
     <div id="status"></div>
   </div>
   <div id="right" class="panel"><div id="pc"><small>Political capital</small><b>0</b></div><div id="combo"></div><div id="perks"></div></div>
-  <div id="help" class="panel"><kbd>WASD</kbd> move · <kbd>J</kbd> jab · <kbd>K</kbd> kick · <kbd>L</kbd> special · <kbd>Space</kbd> dodge · <kbd>Q</kbd> tag · <kbd>E</kbd> assist · <kbd>F</kbd> super · <kbd>P</kbd> pause · <kbd>M</kbd> mute</div>
+  <div id="bar" class="panel">
+    <div id="abs">
+      <div class="ab" data-c="ab" id="abQ"><kbd>Q</kbd><span>Jab</span><i></i></div>
+      <div class="ab" data-c="ab" id="abW"><kbd>W</kbd><span>Kick</span><i></i></div>
+      <div class="ab" data-c="ab" id="abE"><kbd>E</kbd><span>Special</span><i></i></div>
+      <div class="ab" data-c="ab" id="abR"><kbd>R</kbd><span>Super</span><i></i></div>
+      <div class="gap"></div>
+      <div class="ab sm" data-c="ab sm" id="abD"><kbd>D</kbd><span>Dodge</span><i></i></div>
+      <div class="ab sm" data-c="ab sm" id="abF"><kbd>F</kbd><span>Tag</span><i></i></div>
+      <div class="ab sm" data-c="ab sm" id="abG"><kbd>G</kbd><span>Assist</span><i></i></div>
+    </div>
+    <div id="hint"><b>Right-click</b> move / attack · <kbd>A</kbd> attack-move · <kbd>S</kbd> stop · <kbd>P</kbd> pause · <kbd>M</kbd> mute</div>
+  </div>
 </div>
 
 <div id="float"></div>
@@ -208,6 +225,6 @@ body[data-mode="play"] #touch.on { display: block; }
 </div>
 
 <script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }</script>
-<script type="module" src="game.js?v=1"></script>
+<script type="module" src="game.js?v=4"></script>
 </body>
 </html>
