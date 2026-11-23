@@ -42,7 +42,7 @@ function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.asp
 addEventListener('resize', resize); resize();
 
 // ------------------------------------------------------------------ audio (all synthesised)
-let AC = null, master = null, musicBus = null, noiseBuf = null, muted = false;
+let AC = null, master = null, musicBus = null, noiseBuf = null, muted = !!store.get().muted;      // the mute choice survives a reload
 const MUSIC = { on: false, step: 0, next: 0, root: 55, bpm: 124 };
 function initAudio() {
   if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
@@ -105,7 +105,7 @@ function musicTick() {
   }
 }
 function setMusic(on, root = 55, bpm = 124) { MUSIC.on = on; MUSIC.root = root; MUSIC.bpm = bpm; }
-function toggleMute() { muted = !muted; if (master) master.gain.value = muted ? 0 : .5; toast(muted ? 'Muted. The standup continues silently.' : 'Sound on.', 1.6); }
+function toggleMute() { muted = !muted; store.set({ muted }); if (master) master.gain.value = muted ? 0 : .5; toast(muted ? 'Muted. The standup continues silently.' : 'Sound on.', 1.6); }
 
 // ------------------------------------------------------------------ DOM effects
 const _v = new THREE.Vector3();
@@ -1312,7 +1312,10 @@ function pose(mode) {                                     // where the two of th
 function showTitle() {
   G.mode = 'ready'; setMusic(false); $('hud').className = 'hide'; resetField(); buildArena('eng'); active = 0; pose('title'); P.x = 0;
   const s = store.get(), best = s.best ? `<small>Best political capital: <b>${s.best}</b>${s.wave ? ` · Longest backlog: <b>${s.wave} tickets</b>` : ''}</small>` : '';
-  const acts = { enter: startStory, b: () => startEndless(false), fs: goFullscreen }, mobile = G.input === 'touch';
+  const run = parkRun(), acts = { enter: run ? () => resumeRun(run, true) : startStory, n: startStory, b: () => startEndless(false), fs: goFullscreen }, mobile = G.input === 'touch';
+  const starts = run      // with a saved run, Continue is the main button and a new game takes a deliberate press
+    ? `<button class="go" data-act="enter" id="go">Continue: ${runLabel(run)}${hk('enter')}</button><button data-act="n">New game: eight levels${hk('n')}</button>`
+    : `<button class="go" data-act="enter" id="go">Start: eight levels${hk('enter')}</button>`;
   const how = mobile ? `<div class="keys">
       <span><b>Left thumb</b></span><span>Drag anywhere on the left side to move.</span>
       <span><b>Jab · Kick</b></span><span>Hold Jab to keep swinging; Kick after two jabs for a roundhouse. Attacks find the nearest robot by themselves.</span>
@@ -1324,7 +1327,7 @@ function showTitle() {
     <p><small>Upright works; sideways shows more of the room. A controller or keyboard also works if you connect one.</small></p>` : null;
   if (mobile) return card(`<div class="kick">Glenntooth &amp; Coffee Guy vs. the AI Transformation</div><h1>PER MY <em>LAST PUNCH</em></h1>
     <p>MEGACORP went AI-native overnight. Nobody tested it. Tag in, tag out, and clear eight floors of rogue office AI.</p>
-    <div class="row" style="margin-top:10px"><button class="go" data-act="enter" id="go">Start: eight levels</button><button data-act="b">Endless backlog</button>${document.documentElement.requestFullscreen ? '<button data-act="fs">Full screen</button>' : ''}</div>
+    <div class="row" style="margin-top:10px">${starts}<button data-act="b">Endless backlog</button>${document.documentElement.requestFullscreen ? '<button data-act="fs">Full screen</button>' : ''}</div>
     <h3>How to fight</h3>${how}
     <div class="row" style="margin-top:6px">${best}<small>A companion to <a href="https://rayhe.net/glenntooth/" target="_blank" rel="noopener">Glenntooth the UniFier</a>.</small></div>`, acts, true);
   card(`<div class="kick">Glenntooth &amp; Coffee Guy vs. the AI Transformation</div><h1>PER MY <em>LAST PUNCH</em></h1>
@@ -1341,7 +1344,7 @@ function showTitle() {
     </div>
     <p><small>No mouse? The arrow keys move, and <kbd>Space</kbd> also dodges. <kbd>P</kbd> pauses.</small></p>
     <p><small><b>Controller</b> (Xbox or PlayStation, plug in and press a button): left stick moves, right stick aims · <kbd>X</kbd>/<kbd>□</kbd> jab · <kbd>Y</kbd>/<kbd>△</kbd> kick · <kbd>B</kbd>/<kbd>○</kbd> special · <kbd>A</kbd>/<kbd>✕</kbd> dodge · <kbd>RB</kbd>/<kbd>R1</kbd> tag · <kbd>LB</kbd>/<kbd>L1</kbd> assist · <kbd>RT</kbd>/<kbd>R2</kbd> super. In menus <kbd>A</kbd>/<kbd>✕</kbd> confirms and <kbd>Y</kbd>/<kbd>△</kbd> starts the endless backlog.</small></p>
-    <div class="row"><button class="go" data-act="enter" id="go">Start: eight levels${hk('enter')}</button><button data-act="b">Endless backlog${hk('b')}</button></div>
+    <div class="row">${starts}<button data-act="b">Endless backlog${hk('b')}</button></div>
     <div class="row" style="margin-top:10px">${best}<small>A companion to <a href="https://rayhe.net/glenntooth/" target="_blank" rel="noopener">Glenntooth the UniFier</a>. <kbd>M</kbd> mutes. Also plays on a phone.</small></div>`, acts, true);
 }
 function goFullscreen() {                                 // phones: use the whole screen, and turn it sideways where the browser allows that
@@ -1350,14 +1353,52 @@ function goFullscreen() {                                 // phones: use the who
     if (p && p.then) p.then(() => { if (document.fullscreenElement && screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(() => {}); setTimeout(resize, 300); }).catch(() => {});
   } catch { /* not supported here */ }
 }
-function startStory() { T.perks.clear(); T.pc = 0; T.caf = 150; G.story = true; G.level = START_LEVEL; resetTeam(); showIntro(); }
+// ---- the run is saved at every level card, ticket, boss and perk choice, so a reload (or a phone dropping the tab) puts you back where you were
+const RUN_KEY = 'pmlp-run';
+function saveRun(stage) {                                 // stage: 'intro' (level card) · 'play' (start of a ticket or a boss) · 'clear' (choosing a perk)
+  try {
+    localStorage.setItem(RUN_KEY, JSON.stringify({ v: 1, on: true, stage, story: G.story, level: G.level, wave: G.wave, ewave: G.endless.wave, theme: arena.userData.key,
+      perks: [...T.perks], pc: T.pc, caf: T.caf, active, team: team.map(f => ({ hp: f.hp, rec: f.rec, ko: f.ko })), stats: G.stats, micro: G.microUsed }));
+  } catch { /* no storage (private mode): play on without saving */ }
+}
+function loadRun() { try { const r = JSON.parse(localStorage.getItem(RUN_KEY) || 'null'); return r && r.v === 1 && Array.isArray(r.team) && r.team.length === 2 ? r : null; } catch { return null; } }
+function dropRun() { try { localStorage.removeItem(RUN_KEY); } catch { /* nothing to drop */ } }
+function parkRun() { const r = loadRun(); if (!r) return null; r.on = false; try { localStorage.setItem(RUN_KEY, JSON.stringify(r)); } catch { /* fine */ } return r; }      // quit to the title on purpose: keep it as “Continue”, don't jump back in
+const runLabel = r => r.story ? `Level ${r.level + 1}, ${LEVELS[r.level].room.toLowerCase().replace(/\b\w/g, c => c.toUpperCase())}` : `Endless backlog, ticket ${Math.max(1, r.ewave)}`;
+function resumeRun(r, direct) {                           // put everything back as it was at the last checkpoint
+  T.perks.clear(); for (const p of r.perks || []) T.perks.add(p); T.pc = r.pc || 0; T.caf = r.caf ?? 150;
+  G.story = !!r.story; G.level = clamp(r.level | 0, 0, LEVELS.length - 1); G.endless.wave = r.ewave | 0; G.wave = r.wave | 0;
+  team.forEach((f, i) => { const t = r.team[i]; f.hp = clamp(+t.hp || 0, 0, f.maxHp); f.rec = clamp(+t.rec || 0, f.hp, f.maxHp); f.ko = !!t.ko || f.hp <= 0; f.spCd = 0; f.pip = 0; });
+  if (team[0].ko && team[1].ko) resetTeam();
+  active = r.active === 1 ? 1 : 0; if (team[active].ko) active = 1 - active;
+  if (r.stage === 'intro' && G.story) return showIntro();
+  const L = LEVELS[G.level]; setMusic(false); resetField(); buildArena(THEMES[r.theme] ? r.theme : G.story ? L.theme : 'eng');
+  if (r.stage === 'clear') {
+    G.mode = 'clear'; $('hud').className = 'hide'; pose();
+    return offerPerks(`<div class="kick">${G.story ? `Level ${G.level + 1} cleared · ${L.room}` : 'The endless backlog'}</div><h2>Where were we?</h2><p>${G.story ? 'The bogeyman is still sunset, and the report is filed.' : `Sprint ${G.endless.wave / 5} is still closed.`} You were choosing a perk.</p>`);
+  }
+  if (direct) return resumePlay(r);
+  const boss = G.story ? G.wave >= L.waves.length : G.endless.wave % 5 === 0;
+  const where = G.story ? (boss ? `You were about to meet <b>${BOTS[L.boss].name}</b>.` : `You were on ticket ${G.wave + 1} of ${L.waves.length}: “${L.waves[G.wave].t}”.`) : (boss ? `Ticket ${G.endless.wave} was a bogeyman.` : `You were on ticket ${G.endless.wave}.`);
+  G.mode = 'resume'; $('hud').className = 'hide'; pose();
+  card(`<div class="kick">Back at your desk</div><h2>${G.story ? `Level ${G.level + 1} of 8 · ${L.room}` : 'The endless backlog'}</h2><p>${where}</p>
+    <p><small>Jeremy (AI bot): “I kept your place. Morale, caffeine and perks are as they were when this ticket was opened. I also kept counting.”</small></p>
+    <div class="row"><button class="go" data-act="enter">Pick it back up${hk('enter')}</button><button data-act="esc">Title${hk('esc')}</button></div>`, { enter: () => resumePlay(r), esc: showTitle });
+}
+function resumePlay(r) {                                  // re-open the ticket (or the boss) the save was taken at
+  closeCard(); beginPlay(); G.stats = { t: 0, dmg: 0, maxCombo: 0, kills: 0, ...(r.stats || {}) }; G.microUsed = !!r.micro; T.caf = clamp(r.caf ?? T.caf, 0, 800);
+  if (G.story) { levelSetup(); G.wave = (r.wave | 0) - 1; } else { endlessSetup(); G.endless.wave = Math.max(0, (r.ewave | 0) - 1); }
+  G.phase = 'waves'; G.gap = .8;
+}
+function endlessSetup() { $('lvl').textContent = 'THE ENDLESS BACKLOG'; hudF[0].small.textContent = 'Lord Bluetooth, Duke of Spectrum'; }
+function startStory() { dropRun(); T.perks.clear(); T.pc = 0; T.caf = 150; G.story = true; G.level = START_LEVEL; resetTeam(); showIntro(); }
 function startEndless(keep) {
-  if (!keep) { T.perks.clear(); T.pc = 0; } T.caf = 150; G.story = false; G.endless.wave = 0; resetTeam(); resetField(); buildArena('eng'); closeCard(); beginPlay();
-  $('lvl').textContent = 'THE ENDLESS BACKLOG'; hudF[0].small.textContent = 'Lord Bluetooth, Duke of Spectrum'; G.gap = 1; G.phase = 'waves';
+  dropRun(); if (!keep) { T.perks.clear(); T.pc = 0; } T.caf = 150; G.story = false; G.endless.wave = 0; resetTeam(); resetField(); buildArena('eng'); closeCard(); beginPlay();
+  endlessSetup(); G.gap = 1; G.phase = 'waves';
 }
 function showIntro() {
   const L = LEVELS[G.level], bd = BOTS[L.boss];
-  G.mode = 'intro'; setMusic(false); $('hud').className = 'hide'; resetField(); buildArena(L.theme); pose();
+  G.mode = 'intro'; setMusic(false); $('hud').className = 'hide'; resetField(); buildArena(L.theme); pose(); saveRun('intro');
   card(`<div class="kick">Level ${G.level + 1} of 8 · ${L.room} · ${L.when}</div><h2>${L.title}</h2><p>${L.intro}</p>
     <div class="q" style="--col:var(--g)"><b>GLENNTOOTH</b> “${L.glenn}”</div><div class="q" style="--col:var(--c)"><b>COFFEE GUY</b> “${L.coffee}”</div>
     <div class="bogey"><small>BOGEYMAN</small><br><b>${bd.name}</b><br><small>${bd.sub}</small></div>
@@ -1370,10 +1411,13 @@ function beginPlay() {
   $('perks').textContent = PERKS.filter(p => perk(p.id)).map(p => p.icon).join(' ');
   setMusic(true, 55, 124);
 }
-function beginLevel() {
-  const L = LEVELS[G.level]; closeCard(); resetTeam(); beginPlay();
+function levelSetup() {                                   // how hard this level's robots hit, and what the HUD calls it
+  const L = LEVELS[G.level];
   G.hpScale = 1 + G.level * .1; G.dmgScale = 1 + G.level * .07; G.atkGap = Math.max(.3, .95 - G.level * .08); G.cap = 6 + (G.level >> 1);
   $('lvl').textContent = `Level ${G.level + 1}/8 · ${L.room}`; hudF[0].small.textContent = GTITLE[G.level];
+}
+function beginLevel() {
+  closeCard(); resetTeam(); beginPlay(); levelSetup();
   G.phase = 'waves'; G.wave = -1; G.gap = .6;
   if (G.level === 0) toast(G.input === 'touch'
     ? '<b>Jeremy (AI bot):</b> drag on the left to move, hold <kbd>Jab</kbd> on the right. <kbd>Dodge</kbd> gets you out of the red circles, and <kbd>Tag</kbd> swaps before one of you runs out of morale. I will be counting.'
@@ -1389,11 +1433,11 @@ function endlessList(n) {
 }
 function advance() {
   if (G.story) {
-    const L = LEVELS[G.level]; G.wave++;
+    const L = LEVELS[G.level]; G.wave++; saveRun('play');
     if (G.wave >= L.waves.length) return bossIntro(L.boss, 1);
     const w = L.waves[G.wave]; banner(`TICKET ${G.wave + 1} OF ${L.waves.length}`, w.t, 2.4); $('wave').textContent = w.t; queueWave(w.s);
   } else {
-    const E = G.endless, n = ++E.wave, b = n / 5 - 1;
+    const E = G.endless, n = ++E.wave, b = n / 5 - 1; saveRun('play');
     G.hpScale = 1 + n * .07; G.dmgScale = 1 + n * .04; G.atkGap = Math.max(.25, .9 - n * .03); G.cap = Math.min(11, 6 + (n / 3 | 0));
     if (n % 5 === 0) return bossIntro(LEVELS[b % 8].boss, 1 + b * .1 + Math.floor(b / 8) * .6);
     const t = pick(TICKETS); banner(`TICKET #${4000 + n * 7}`, t, 2.4); $('wave').textContent = `Ticket ${n} · ${t}`; queueWave(endlessList(n));
@@ -1427,18 +1471,21 @@ function levelClear() {
     head = `<div class="kick">The endless backlog</div><h2>Sprint ${G.endless.wave / 5} closed</h2><p>${G.endless.wave} tickets resolved, ${T.pc} political capital. The backlog was refilled while you were reading this.</p>`;
     for (const f of team) { if (f.ko) { f.ko = false; f.hp = f.rec = f.maxHp * .5; } else f.hp = f.rec = Math.max(f.rec, f.maxHp * .75); }
   }
-  const next = () => {
-    if (G.story) { if (++G.level >= LEVELS.length) showEnding(); else showIntro(); }
-    else { closeCard(); buildArena(LEVELS[(G.endless.wave / 5) % 8].theme); beginPlay(); G.phase = 'waves'; G.gap = 1; }
-  };
-  const opts = G.story && G.level === LEVELS.length - 1 ? [] : shuffle(PERKS.filter(p => !perk(p.id))).slice(0, 3);
+  saveRun('clear'); offerPerks(head);
+}
+function afterClear() {                                   // on to the next level, the ending, or the next sprint
+  if (G.story) { if (++G.level >= LEVELS.length) showEnding(); else showIntro(); }
+  else { closeCard(); buildArena(LEVELS[(G.endless.wave / 5) % 8].theme); beginPlay(); endlessSetup(); G.phase = 'waves'; G.gap = 1; }
+}
+function offerPerks(head) {
+  const acts = {}, opts = G.story && G.level === LEVELS.length - 1 ? [] : shuffle(PERKS.filter(p => !perk(p.id))).slice(0, 3);
   let tail = `<div class="row"><button class="go" data-act="enter">Continue${hk('enter')}</button></div>`;
-  if (opts.length) tail = `<h3>Exec suite · choose one perk</h3><div class="perks">` + opts.map((p, i) => { acts[i + 1] = () => { T.perks.add(p.id); next(); }; return `<button data-act="${i + 1}"><kbd>${i + 1}</kbd><span class="ic">${p.icon}</span><b>${p.name}</b><small>${p.desc}</small></button>`; }).join('') + `</div>`;
-  else acts.enter = next;
+  if (opts.length) tail = `<h3>Exec suite · choose one perk</h3><div class="perks">` + opts.map((p, i) => { acts[i + 1] = () => { T.perks.add(p.id); afterClear(); }; return `<button data-act="${i + 1}"><kbd>${i + 1}</kbd><span class="ic">${p.icon}</span><b>${p.name}</b><small>${p.desc}</small></button>`; }).join('') + `</div>`;
+  else acts.enter = afterClear;
   card(head + tail, acts);
 }
 function showEnding() {
-  G.mode = 'ending'; const s = store.get(); store.set({ best: Math.max(s.best || 0, T.pc), won: true }); buildArena('board'); pose('title');
+  G.mode = 'ending'; const s = store.get(); store.set({ best: Math.max(s.best || 0, T.pc), won: true }); dropRun(); buildArena('board'); pose('title');
   card(`<div class="kick">Day 30 · 9:47 AM · The boardroom</div><h1>NUMBER <em>WENT UP</em></h1>
     <p>The CEO’s AI Clone has been sunset. The real CEO has not noticed. The board skimmed the summary and approved it.</p>
     <p><b style="color:var(--g)">Glenn</b> is promoted to <b>Lord Bluetooth, Duke of Spectrum</b>. The crown is no longer ironic.<br><b style="color:var(--c)">Coffee Guy</b> remains Lead Installer. He has been given a mug and, for the first time in thirty days, a coffee made by a person.</p>
@@ -1449,12 +1496,12 @@ function showEnding() {
 function gameOver() {
   G.mode = 'over'; setMusic(false); $('hud').className = 'hide'; const s = store.get();
   if (G.story) {
-    store.set({ best: Math.max(s.best || 0, T.pc) }); const L = LEVELS[G.level];
+    store.set({ best: Math.max(s.best || 0, T.pc) }); const L = LEVELS[G.level]; saveRun('intro');       // a reload from here retries the level, perks intact
     card(`<div class="kick">Level ${G.level + 1} · ${L.room}</div><h2>You have been moved to Special Projects.</h2><p>Unkillable. Unpromotable. In this case, also unconscious.</p>
       <p><small>Jeremy (AI bot): “Per my last email: <kbd>${K('dodge')}</kbd> dodges, and a partner on the bench gets morale back. Tag more, with <kbd>${K('tag')}</kbd>.”</small></p>
       <div class="row"><button class="go" data-act="enter">Retry this level${hk('enter')}</button><button data-act="esc">Title${hk('esc')}</button></div>`, { enter: showIntro, esc: showTitle });
   } else {
-    const n = Math.max(0, G.endless.wave - 1); store.set({ best: Math.max(s.best || 0, T.pc), wave: Math.max(s.wave || 0, n) });
+    const n = Math.max(0, G.endless.wave - 1); store.set({ best: Math.max(s.best || 0, T.pc), wave: Math.max(s.wave || 0, n) }); dropRun();
     card(`<div class="kick">The endless backlog</div><h2>${n} tickets closed. The backlog remains endless.</h2><p>Political capital: <b>${T.pc}</b>. Longest run: <b>${Math.max(s.wave || 0, n)}</b> tickets.</p>
       <p><small>Jeremy (AI bot): “I have re-opened all of them.”</small></p>
       <div class="row"><button class="go" data-act="enter">Again${hk('enter')}</button><button data-act="esc">Title${hk('esc')}</button></div>`, { enter: () => startEndless(false), esc: showTitle });
@@ -1515,6 +1562,7 @@ addEventListener('keydown', e => {
 });
 addEventListener('keyup', e => keys.delete(e.code));
 addEventListener('blur', () => { keys.clear(); M.rmb = M.lmb = false; });
+document.addEventListener('visibilitychange', () => { if (document.hidden && G.mode === 'play' && !G.paused) togglePause(); });      // switched apps or tabs: pause, don't get beaten up in the background
 const mouseAt = e => { M.on = true; M.sx = e.clientX; M.sy = e.clientY; };
 addEventListener('pointermove', e => { if (e.pointerType === 'mouse' && G.input !== 'pad') mouseAt(e); });       // while a controller is in use, a nudged mouse does not take over
 addEventListener('pointerup', e => { if (e.pointerType !== 'mouse') return; if (e.button === 2) M.rmb = false; else if (e.button === 0) M.lmb = false; });
@@ -1555,7 +1603,7 @@ const PAD = { idx: -1, kind: 'xbox', prev: [], x: 0, y: 0, aim: false, hold: nul
 const HINT_KBM = $('hint').innerHTML;
 const TOUCHL = { light: 'Jab', heavy: 'Kick', special: 'Special', super: 'Super', dodge: 'Dodge', tag: 'Tag', assist: 'Assist' };
 const K = a => G.input === 'pad' ? PADS[PAD.kind][a] : G.input === 'touch' ? TOUCHL[a] : KEYS[a];      // what a button is called in on-screen hints, for whichever device was touched last
-const hk = a => G.input === 'touch' ? '' : ` (${G.input === 'pad' ? PADS[PAD.kind][{ enter: 'dodge', esc: 'special', b: 'heavy' }[a]] : { enter: 'Enter', esc: 'Esc', b: 'B' }[a]})`;      // the shortcut shown on a menu button
+const hk = a => G.input === 'touch' ? '' : ` (${G.input === 'pad' ? PADS[PAD.kind][{ enter: 'dodge', esc: 'special', b: 'heavy', n: 'light' }[a]] : { enter: 'Enter', esc: 'Esc', b: 'B', n: 'N' }[a]})`;      // the shortcut shown on a menu button
 function useDevice(d) {                                   // 'kbm', 'pad' or 'touch': swap the on-screen labels and controls to match
   if (G.input === d) return; G.input = d; document.body.dataset.input = d;
   if (d !== 'kbm') { M.on = M.rmb = M.lmb = false; P.order = null; }
@@ -1586,7 +1634,7 @@ function pollPad() {
   if (G.card) {
     const c = G.card, nums = ['1', '2', '3'].filter(k => c[k]), nav = x < -.5 ? -1 : x > .5 ? 1 : 0; let fn = null;
     if (nums.length) { if (nav && nav !== PAD.nav) { PAD.sel = clamp(PAD.sel + nav, 0, nums.length - 1); sfx('ui'); padPick(); } if (down(0)) fn = c[nums[clamp(PAD.sel, 0, nums.length - 1)]]; }
-    else fn = (down(0) || down(9)) ? c.enter : down(3) ? c.b : down(1) ? c.esc : null;
+    else fn = (down(0) || down(9)) ? c.enter : down(3) ? c.b : down(1) ? c.esc : down(2) ? c.n : null;
     PAD.nav = nav; PAD.hold = null; if (fn) { sfx('ui'); PAD.prev = b; fn(); return; }
   } else if (G.mode === 'play') {
     if (down(9)) togglePause();
@@ -1629,6 +1677,8 @@ card(`<div class="kick">Glenntooth &amp; Coffee Guy vs. the AI Transformation</d
 updateCamera(1); renderer.render(scene, camera);
 Promise.all(FDEF.map(loadFighter)).then(fs => {
   team.push(...fs); fs.forEach((f, i) => { hudF[i].img.src = portrait(f); });
-  showTitle(); requestAnimationFrame(frame);
+  const saved = loadRun();                                // a run that was in progress when the page went away: go straight back to it
+  if (saved && saved.on && !new URLSearchParams(location.search).has('level')) resumeRun(saved); else showTitle();
+  requestAnimationFrame(frame);
 }).catch(err => { console.error(err); $('cardIn').innerHTML = `<h2>The tag team did not load.</h2><p>${String(err.message || err)}</p><p><small>This page needs to be served over http(s) with <code>assets/glenn.glb</code> and <code>assets/coffee.glb</code> next to it.</small></p>`; });
-window.PMLP = { G, T, P, M, team, enemies, hazards, shots, rings, beams, zones, pickups, keys, touch, LEVELS, BOTS, PAD, TB, press, order, sim, pollPad, toScreen, spawnEnemy, damageEnemy, get active() { return active; } };      // for poking at it from the console
+window.PMLP = { G, T, P, M, team, enemies, hazards, shots, rings, beams, zones, pickups, keys, touch, LEVELS, BOTS, PAD, TB, press, order, sim, pollPad, toScreen, spawnEnemy, damageEnemy, loadRun, dropRun, get active() { return active; } };      // for poking at it from the console

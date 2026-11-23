@@ -67,6 +67,8 @@ Only one of them fights at a time. The one on the bench recovers morale, and tag
 
 Level text, waves, perks and boss stats are data tables in `game.js` (`LEVELS`, `PERKS`, `BOTS`). Add `?level=5` to the URL to start the story at a given level.
 
+**Saving.** The run is saved in the browser's local storage at every level card, ticket, boss and perk choice. Reload the page, or have a phone drop the tab, and you are put back at the start of the ticket you were on with the same morale, caffeine and perks. Quitting to the title keeps the run as a Continue button. The game also pauses itself when the tab is hidden, and remembers whether you muted it.
+
 ## Run it locally
 
 The page uses ES modules and fetches `.glb` files, so it needs `http://`, not `file://`. Any static file server works. On Windows, with nothing installed:

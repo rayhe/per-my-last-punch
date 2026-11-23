@@ -32,7 +32,7 @@ window.runBot = function (seconds, opts = {}) {
 window.runStory = function (opts = {}) {                  // start from the title screen
   const { G } = PMLP, out = [];
   if (G.mode !== 'ready') return 'not at title: ' + G.mode;
-  G.card.enter();
+  (G.card.n || G.card.enter)();                           // always a new game, even if a saved run is offering "Continue"
   for (let i = G.level; i < 8; i++) {
     G.card.enter(); let bossT = 0, t = 0;
     while (G.mode === 'play' && t < 900) { runBot(1, opts); t += 1; if (G.phase === 'boss') bossT += 1; }
