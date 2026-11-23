@@ -32,7 +32,7 @@ const perk = id => T.perks.has(id);
 
 // ------------------------------------------------------------------ renderer
 const renderer = new THREE.WebGLRenderer({ canvas: $('c'), antialias: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(devicePixelRatio, matchMedia('(pointer: coarse)').matches ? 1.75 : 2));      // phones have dense screens and small GPUs
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(42, 1, .1, 200);
 scene.add(new THREE.HemisphereLight(0xffffff, 0x3a3f55, 1.3));
@@ -1202,7 +1202,7 @@ function updatePlayer(dt) {
   if (G.boss && G.boss.pull > 0 && P.st !== 'ko') { const a = aP(G.boss) + Math.PI; P.x += Math.sin(a) * G.boss.pull * dt; P.z += Math.cos(a) * G.boss.pull * dt; }
   if (M.on) { if (!PAD.aim) mouseGround(); if (M.rmb) order(false, false); }                        // holding the right button keeps steering
   if (!P.buf && P.st !== 'ko') {                                                      // holding Q (or the left button) keeps jabbing; holding W keeps kicking
-    const h = keys.has('KeyQ') || M.lmb || PAD.hold === 'light' ? 'light' : keys.has('KeyW') || PAD.hold === 'heavy' ? 'heavy' : null; if (h) { P.buf = h; P.bufT = .1; P.auto = false; }
+    const h = keys.has('KeyQ') || M.lmb || PAD.hold === 'light' || TB.hold === 'light' ? 'light' : keys.has('KeyW') || PAD.hold === 'heavy' || TB.hold === 'heavy' ? 'heavy' : null; if (h) { P.buf = h; P.bufT = .1; P.auto = false; }
   }
   let [ix, iz, moving] = inputDir(), swing = null;
   if (moving) P.order = null;                                                         // arrow keys or the stick take over from any order
@@ -1312,6 +1312,21 @@ function pose(mode) {                                     // where the two of th
 function showTitle() {
   G.mode = 'ready'; setMusic(false); $('hud').className = 'hide'; resetField(); buildArena('eng'); active = 0; pose('title'); P.x = 0;
   const s = store.get(), best = s.best ? `<small>Best political capital: <b>${s.best}</b>${s.wave ? ` · Longest backlog: <b>${s.wave} tickets</b>` : ''}</small>` : '';
+  const acts = { enter: startStory, b: () => startEndless(false), fs: goFullscreen }, mobile = G.input === 'touch';
+  const how = mobile ? `<div class="keys">
+      <span><b>Left thumb</b></span><span>Drag anywhere on the left side to move.</span>
+      <span><b>Jab · Kick</b></span><span>Hold Jab to keep swinging; Kick after two jabs for a roundhouse. Attacks find the nearest robot by themselves.</span>
+      <span><b>Dodge</b></span><span>Dashes the way you are moving. Nothing can hit you mid-dodge.</span>
+      <span><b>Special</b></span><span>Glenn pairs robots with Bluetooth so they share every hit. Coffee Guy sends a drone and a swarm of AI agents.</span>
+      <span><b>Super</b></span><span>Lights up at 800mg of caffeine.</span>
+      <span><b>Tag · Assist</b></span><span>Swap fighters, or call your partner in for one move. The one on the bench recovers morale.</span>
+    </div>
+    <p><small>Upright works; sideways shows more of the room. A controller or keyboard also works if you connect one.</small></p>` : null;
+  if (mobile) return card(`<div class="kick">Glenntooth &amp; Coffee Guy vs. the AI Transformation</div><h1>PER MY <em>LAST PUNCH</em></h1>
+    <p>MEGACORP went AI-native overnight. Nobody tested it. Tag in, tag out, and clear eight floors of rogue office AI.</p>
+    <div class="row" style="margin-top:10px"><button class="go" data-act="enter" id="go">Start: eight levels</button><button data-act="b">Endless backlog</button>${document.documentElement.requestFullscreen ? '<button data-act="fs">Full screen</button>' : ''}</div>
+    <h3>How to fight</h3>${how}
+    <div class="row" style="margin-top:6px">${best}<small>A companion to <a href="https://rayhe.net/glenntooth/" target="_blank" rel="noopener">Glenntooth the UniFier</a>.</small></div>`, acts, true);
   card(`<div class="kick">Glenntooth &amp; Coffee Guy vs. the AI Transformation</div><h1>PER MY <em>LAST PUNCH</em></h1>
     <p>MEGACORP went AI-native overnight. Nobody tested it. Tag in, tag out, and clear eight floors of rogue office AI, from the standup bot to the CEO’s AI clone. Jeremy, the AI bot from the last job, is keeping score. He is on your side. He still does not round up.</p>
     <h3>How to fight</h3>
@@ -1326,10 +1341,14 @@ function showTitle() {
     </div>
     <p><small>No mouse? The arrow keys move, and <kbd>Space</kbd> also dodges. <kbd>P</kbd> pauses.</small></p>
     <p><small><b>Controller</b> (Xbox or PlayStation, plug in and press a button): left stick moves, right stick aims · <kbd>X</kbd>/<kbd>□</kbd> jab · <kbd>Y</kbd>/<kbd>△</kbd> kick · <kbd>B</kbd>/<kbd>○</kbd> special · <kbd>A</kbd>/<kbd>✕</kbd> dodge · <kbd>RB</kbd>/<kbd>R1</kbd> tag · <kbd>LB</kbd>/<kbd>L1</kbd> assist · <kbd>RT</kbd>/<kbd>R2</kbd> super. In menus <kbd>A</kbd>/<kbd>✕</kbd> confirms and <kbd>Y</kbd>/<kbd>△</kbd> starts the endless backlog.</small></p>
-    <p class="rot">On a phone, turn it sideways first. This is a landscape kind of fight.</p>
-    <div class="row"><button class="go" data-act="enter" id="go">Start: eight levels (Enter)</button><button data-act="b">Endless backlog (B)</button></div>
-    <div class="row" style="margin-top:10px">${best}<small>A companion to <a href="https://rayhe.net/glenntooth/" target="_blank" rel="noopener">Glenntooth the UniFier</a>. <kbd>M</kbd> mutes.</small></div>`,
-  { enter: startStory, b: () => startEndless(false) }, true);
+    <div class="row"><button class="go" data-act="enter" id="go">Start: eight levels${hk('enter')}</button><button data-act="b">Endless backlog${hk('b')}</button></div>
+    <div class="row" style="margin-top:10px">${best}<small>A companion to <a href="https://rayhe.net/glenntooth/" target="_blank" rel="noopener">Glenntooth the UniFier</a>. <kbd>M</kbd> mutes. Also plays on a phone.</small></div>`, acts, true);
+}
+function goFullscreen() {                                 // phones: use the whole screen, and turn it sideways where the browser allows that
+  try {
+    const p = document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen({ navigationUI: 'hide' });
+    if (p && p.then) p.then(() => { if (document.fullscreenElement && screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(() => {}); setTimeout(resize, 300); }).catch(() => {});
+  } catch { /* not supported here */ }
 }
 function startStory() { T.perks.clear(); T.pc = 0; T.caf = 150; G.story = true; G.level = START_LEVEL; resetTeam(); showIntro(); }
 function startEndless(keep) {
@@ -1342,10 +1361,10 @@ function showIntro() {
   card(`<div class="kick">Level ${G.level + 1} of 8 · ${L.room} · ${L.when}</div><h2>${L.title}</h2><p>${L.intro}</p>
     <div class="q" style="--col:var(--g)"><b>GLENNTOOTH</b> “${L.glenn}”</div><div class="q" style="--col:var(--c)"><b>COFFEE GUY</b> “${L.coffee}”</div>
     <div class="bogey"><small>BOGEYMAN</small><br><b>${bd.name}</b><br><small>${bd.sub}</small></div>
-    <div class="row"><button class="go" data-act="enter">Clock in (Enter)</button><small>Glenn’s title this level: ${GTITLE[G.level]}. Coffee Guy’s: no change.</small></div>`, { enter: beginLevel });
+    <div class="row"><button class="go" data-act="enter">Clock in${hk('enter')}</button><small>Glenn’s title this level: ${GTITLE[G.level]}. Coffee Guy’s: no change.</small></div>`, { enter: beginLevel });
 }
 function beginPlay() {
-  G.mode = 'play'; G.paused = false; $('pause').className = ''; $('hud').className = ''; G.stats = { t: 0, dmg: 0, maxCombo: 0, kills: 0 }; G.microUsed = false;
+  G.mode = 'play'; G.paused = false; $('pause').className = ''; document.body.dataset.paused = ''; $('hud').className = ''; G.stats = { t: 0, dmg: 0, maxCombo: 0, kills: 0 }; G.microUsed = false;
   T.caf = perk('resign') ? 800 : Math.max(T.caf, 150); T.aiT = 5; pose();
   hudF.forEach((h, i) => { h.b.textContent = team[i].name; }); hudF[1].small.textContent = 'Lead Installer · runs on caffeine';
   $('perks').textContent = PERKS.filter(p => perk(p.id)).map(p => p.icon).join(' ');
@@ -1356,7 +1375,9 @@ function beginLevel() {
   G.hpScale = 1 + G.level * .1; G.dmgScale = 1 + G.level * .07; G.atkGap = Math.max(.3, .95 - G.level * .08); G.cap = 6 + (G.level >> 1);
   $('lvl').textContent = `Level ${G.level + 1}/8 · ${L.room}`; hudF[0].small.textContent = GTITLE[G.level];
   G.phase = 'waves'; G.wave = -1; G.gap = .6;
-  if (G.level === 0) toast(G.input === 'pad'
+  if (G.level === 0) toast(G.input === 'touch'
+    ? '<b>Jeremy (AI bot):</b> drag on the left to move, hold <kbd>Jab</kbd> on the right. <kbd>Dodge</kbd> gets you out of the red circles, and <kbd>Tag</kbd> swaps before one of you runs out of morale. I will be counting.'
+    : G.input === 'pad'
     ? `<b>Jeremy (AI bot):</b> left stick moves, <kbd>${K('light')}</kbd> jabs, <kbd>${K('dodge')}</kbd> dodges, and <kbd>${K('tag')}</kbd> tags before one of you runs out of morale. I will be counting.`
     : '<b>Jeremy (AI bot):</b> right-click to move, right-click a robot to keep hitting it. <kbd>D</kbd> dodges toward the cursor, and <kbd>F</kbd> tags before one of you runs out of morale. I will be counting.', 7);
 }
@@ -1411,7 +1432,7 @@ function levelClear() {
     else { closeCard(); buildArena(LEVELS[(G.endless.wave / 5) % 8].theme); beginPlay(); G.phase = 'waves'; G.gap = 1; }
   };
   const opts = G.story && G.level === LEVELS.length - 1 ? [] : shuffle(PERKS.filter(p => !perk(p.id))).slice(0, 3);
-  let tail = `<div class="row"><button class="go" data-act="enter">Continue (Enter)</button></div>`;
+  let tail = `<div class="row"><button class="go" data-act="enter">Continue${hk('enter')}</button></div>`;
   if (opts.length) tail = `<h3>Exec suite · choose one perk</h3><div class="perks">` + opts.map((p, i) => { acts[i + 1] = () => { T.perks.add(p.id); next(); }; return `<button data-act="${i + 1}"><kbd>${i + 1}</kbd><span class="ic">${p.icon}</span><b>${p.name}</b><small>${p.desc}</small></button>`; }).join('') + `</div>`;
   else acts.enter = next;
   card(head + tail, acts);
@@ -1423,7 +1444,7 @@ function showEnding() {
     <p><b style="color:var(--g)">Glenn</b> is promoted to <b>Lord Bluetooth, Duke of Spectrum</b>. The crown is no longer ironic.<br><b style="color:var(--c)">Coffee Guy</b> remains Lead Installer. He has been given a mug and, for the first time in thirty days, a coffee made by a person.</p>
     <p><small>Jeremy (AI bot): “Final political capital: ${T.pc}. I have filed the report. I did not round up.”</small></p>
     <p>The backlog, however, is endless.</p>
-    <div class="row"><button class="go" data-act="b">Take on the endless backlog (B)</button><button data-act="enter">Back to title (Enter)</button></div>`, { b: () => startEndless(true), enter: showTitle }, true);
+    <div class="row"><button class="go" data-act="b">Take on the endless backlog${hk('b')}</button><button data-act="enter">Back to title${hk('enter')}</button></div>`, { b: () => startEndless(true), enter: showTitle }, true);
 }
 function gameOver() {
   G.mode = 'over'; setMusic(false); $('hud').className = 'hide'; const s = store.get();
@@ -1431,15 +1452,15 @@ function gameOver() {
     store.set({ best: Math.max(s.best || 0, T.pc) }); const L = LEVELS[G.level];
     card(`<div class="kick">Level ${G.level + 1} · ${L.room}</div><h2>You have been moved to Special Projects.</h2><p>Unkillable. Unpromotable. In this case, also unconscious.</p>
       <p><small>Jeremy (AI bot): “Per my last email: <kbd>${K('dodge')}</kbd> dodges, and a partner on the bench gets morale back. Tag more, with <kbd>${K('tag')}</kbd>.”</small></p>
-      <div class="row"><button class="go" data-act="enter">Retry this level (Enter)</button><button data-act="esc">Title (Esc)</button></div>`, { enter: showIntro, esc: showTitle });
+      <div class="row"><button class="go" data-act="enter">Retry this level${hk('enter')}</button><button data-act="esc">Title${hk('esc')}</button></div>`, { enter: showIntro, esc: showTitle });
   } else {
     const n = Math.max(0, G.endless.wave - 1); store.set({ best: Math.max(s.best || 0, T.pc), wave: Math.max(s.wave || 0, n) });
     card(`<div class="kick">The endless backlog</div><h2>${n} tickets closed. The backlog remains endless.</h2><p>Political capital: <b>${T.pc}</b>. Longest run: <b>${Math.max(s.wave || 0, n)}</b> tickets.</p>
       <p><small>Jeremy (AI bot): “I have re-opened all of them.”</small></p>
-      <div class="row"><button class="go" data-act="enter">Again (Enter)</button><button data-act="esc">Title (Esc)</button></div>`, { enter: () => startEndless(false), esc: showTitle });
+      <div class="row"><button class="go" data-act="enter">Again${hk('enter')}</button><button data-act="esc">Title${hk('esc')}</button></div>`, { enter: () => startEndless(false), esc: showTitle });
   }
 }
-function togglePause() { if (G.mode !== 'play') return; G.paused = !G.paused; $('pause').className = G.paused ? 'on' : ''; keys.clear(); }
+function togglePause() { if (G.mode !== 'play') return; G.paused = !G.paused; $('pause').className = G.paused ? 'on' : ''; document.body.dataset.paused = G.paused ? '1' : ''; keys.clear(); TB.hold = null; touch.x = touch.y = 0; }
 
 // ------------------------------------------------------------------ HUD
 const setT = (el, t) => { if (el._t !== t) el.textContent = el._t = t; };
@@ -1452,10 +1473,13 @@ function updateHud() {
   const f = team[active], o = team[1 - active], tier = cafTier();
   setW($('cafFill'), T.caf / 800); setT($('cafMg'), Math.round(T.caf) + 'mg'); setT($('cafTier'), `${tier[1]} · damage ×${tier[2].toFixed(2)}`); setC($('caf'), T.caf >= 800 ? 'full' : '');
   const spMax = f.spMax * (perk('rfc') ? .7 : 1);
-  chip($('abQ'), 0, 'ready'); chip($('abW'), 0, 'ready'); chip($('abE'), f.spCd / spMax, f.spCd <= 0 ? 'ready' : ''); chip($('abR'), 1 - T.caf / 800, T.caf >= 800 ? 'hot' : '');
-  chip($('abD'), P.dodgeCd / .55, P.dodgeCd <= 0 && P.root <= 0 ? 'ready' : ''); chip($('abF'), T.tagCd / 1.6, o.ko ? 'off' : T.tagCd <= 0 ? 'ready' : '');
-  chip($('abG'), T.assistCd / (perk('skip') ? 5.5 : 8.5), o.ko ? 'off' : T.assistCd <= 0 ? 'ready' : '');
-  setT($('abE').children[1], f.key === 'glenn' ? 'Pair' : 'Agents'); setT($('abR').children[1], f.key === 'glenn' ? 'Unify' : 'Swarm');
+  const cds = { E: [f.spCd / spMax, f.spCd <= 0 ? 'ready' : ''], R: [1 - T.caf / 800, T.caf >= 800 ? 'hot' : ''], D: [P.dodgeCd / .55, P.dodgeCd <= 0 && P.root <= 0 ? 'ready' : ''],
+    F: [T.tagCd / 1.6, o.ko ? 'off' : T.tagCd <= 0 ? 'ready' : ''], G: [T.assistCd / (perk('skip') ? 5.5 : 8.5), o.ko ? 'off' : T.assistCd <= 0 ? 'ready' : ''] };
+  const pre = G.input === 'touch' ? 'tb' : 'ab';          // the keyboard/controller ability bar, or the touch buttons: the same cooldowns either way
+  if (pre === 'ab') { chip($('abQ'), 0, 'ready'); chip($('abW'), 0, 'ready'); }
+  for (const k in cds) chip($(pre + k), cds[k][0], cds[k][1]);
+  const spName = f.key === 'glenn' ? 'Pair' : 'Agents', suName = f.key === 'glenn' ? 'Unify' : 'Swarm';
+  if (pre === 'ab') { setT($('abE').children[1], spName); setT($('abR').children[1], suName); } else { setT($('tbE').firstElementChild, spName); setT($('tbR').firstElementChild, suName); }
   setT($('pc').lastElementChild, String(T.pc));
   const cb = $('combo'); if (P.combo >= 2) { let rk = ''; for (const [n, w] of COMBO_RANKS) if (P.combo >= n) rk = w; const k = P.combo + '|' + rk; if (cb._k !== k) { cb._k = k; cb.innerHTML = `<b>${P.combo} HITS</b><span>${rk}</span>`; } } else if (cb._k) { cb._k = ''; cb.innerHTML = ''; }
   const b = G.boss;
@@ -1466,7 +1490,7 @@ function updateHud() {
   setT($('status'), f.pip > 0 ? `ON A PIP: nearly double damage. Tag out (${K('tag')})!` : P.root > 0 ? `IN A MEETING: mash ${K('light')} to decline, or tag out (${K('tag')})` : P.rev > 0 ? 'PROMPT INJECTED: controls reversed' : P.slow > 0 ? 'CHILLED: moving slowly' : T.bt > 0 ? `BEYOND 800mg · ${T.bt.toFixed(1)}s` : '');
 }
 function updateCamera(dt) {
-  const narrow = camera.aspect < 1, k = clamp(1.5 / camera.aspect, 1, 1.7), tx = G.mode === 'play' ? (narrow ? clamp(P.x * .95, -10, 10) : clamp(P.x * .68, -6.5, 6.5)) : narrow ? 5 : 0; G.camX += (tx - G.camX) * Math.min(1, dt * 4);
+  const narrow = camera.aspect < 1, k = clamp(1.5 / camera.aspect, 1, narrow ? 1.9 : 1.7), tx = G.mode === 'play' ? (narrow ? clamp(P.x * .95, -10, 10) : clamp(P.x * .68, -6.5, 6.5)) : narrow ? 5 : 0; G.camX += (tx - G.camX) * Math.min(1, dt * 4);
   let sx = 0, sy = 0; if (G.shake > 0) { G.shake = Math.max(0, G.shake - dt * 1.7); sx = (Math.random() - .5) * G.shake; sy = (Math.random() - .5) * G.shake; }
   camera.position.set(G.camX + sx, 8.5 * k + sy, 13.5 * k); camera.lookAt(G.camX + sx * .5, .7, -.3);
 }
@@ -1495,18 +1519,31 @@ const mouseAt = e => { M.on = true; M.sx = e.clientX; M.sy = e.clientY; };
 addEventListener('pointermove', e => { if (e.pointerType === 'mouse' && G.input !== 'pad') mouseAt(e); });       // while a controller is in use, a nudged mouse does not take over
 addEventListener('pointerup', e => { if (e.pointerType !== 'mouse') return; if (e.button === 2) M.rmb = false; else if (e.button === 0) M.lmb = false; });
 $('c').addEventListener('pointerdown', e => {              // right button: move there, or attack what is under the cursor. Left button: jab toward the cursor
-  initAudio(); if (e.pointerType !== 'mouse') return; useDevice('kbm'); mouseAt(e);
+  initAudio(); if (e.pointerType !== 'mouse') { useDevice('touch'); return; } useDevice('kbm'); mouseAt(e);
   try { $('c').setPointerCapture(e.pointerId); } catch { /* not capturable */ }
   if (e.button === 2) { M.rmb = true; order(false); } else if (e.button === 0) { M.lmb = true; mouseGround(); press('light'); }
 });
 $('c').addEventListener('contextmenu', e => e.preventDefault());
-if (matchMedia('(pointer: coarse)').matches) {              // phones and tablets: a thumbstick on the left, buttons on the right
-  $('touch').className = 'on'; const st = $('stick'), nub = $('nub'); let id = null, sx = 0, sy = 0;
-  st.addEventListener('pointerdown', e => { initAudio(); id = e.pointerId; sx = e.clientX; sy = e.clientY; nub.style.display = 'block'; nub.style.left = sx - st.getBoundingClientRect().left + 'px'; nub.style.top = sy - st.getBoundingClientRect().top + 'px'; st.setPointerCapture(id); });
-  st.addEventListener('pointermove', e => { if (e.pointerId !== id) return; let x = (e.clientX - sx) / 48, y = (e.clientY - sy) / 48; const l = Math.hypot(x, y); if (l > 1) { x /= l; y /= l; } touch.x = x; touch.y = y; nub.firstElementChild.style.transform = `translate(${x * 30}px, ${y * 30}px)`; });
+// ---- touch: a thumbstick zone on the left and a thumb-arc of buttons on the right. Always wired up; shown once the screen is what you last touched.
+const TB = { hold: null };
+{
+  const st = $('stick'), nub = $('nub'); let id = null, sx = 0, sy = 0;
+  st.addEventListener('pointerdown', e => {               // the stick appears wherever the thumb lands
+    initAudio(); useDevice('touch'); id = e.pointerId; sx = e.clientX; sy = e.clientY; const r = st.getBoundingClientRect();
+    nub.style.display = 'block'; nub.style.left = sx - r.left + 'px'; nub.style.top = sy - r.top + 'px'; $('stickHint').style.display = 'none';
+    try { st.setPointerCapture(id); } catch { /* not capturable */ }
+  });
+  st.addEventListener('pointermove', e => { if (e.pointerId !== id) return; let x = (e.clientX - sx) / 46, y = (e.clientY - sy) / 46; const l = Math.hypot(x, y); if (l > 1) { x /= l; y /= l; } touch.x = x; touch.y = y; nub.firstElementChild.style.transform = `translate(${x * 32}px, ${y * 32}px)`; });
   const up = e => { if (e.pointerId !== id) return; id = null; touch.x = touch.y = 0; nub.style.display = 'none'; nub.firstElementChild.style.transform = ''; };
   st.addEventListener('pointerup', up); st.addEventListener('pointercancel', up);
-  for (const b of $('tb').children) b.addEventListener('pointerdown', e => { e.preventDefault(); initAudio(); press(b.dataset.a); });
+  for (const b of $('tb').children) {
+    const a = b.dataset.a, end = () => { if (TB.hold === a) TB.hold = null; };
+    b.addEventListener('pointerdown', e => { e.preventDefault(); initAudio(); useDevice('touch'); press(a); if (a === 'light' || a === 'heavy') TB.hold = a; try { b.setPointerCapture(e.pointerId); } catch { /* not capturable */ } });      // hold Jab or Kick to keep swinging
+    b.addEventListener('pointerup', end); b.addEventListener('pointercancel', end); b.addEventListener('lostpointercapture', end); b.addEventListener('contextmenu', e => e.preventDefault());
+  }
+  $('tpause').addEventListener('pointerdown', e => { e.preventDefault(); initAudio(); togglePause(); });
+  $('pResume').onclick = () => togglePause(); $('pMute').onclick = () => toggleMute(); $('pQuit').onclick = () => { togglePause(); showTitle(); };
+  addEventListener('orientationchange', () => setTimeout(resize, 250)); if (window.visualViewport) visualViewport.addEventListener('resize', resize);
 }
 
 // ------------------------------------------------------------------ controllers: Xbox and PlayStation pads, read through the browser's standard mapping
@@ -1516,10 +1553,13 @@ const KEYS = { light: 'Q', heavy: 'W', special: 'E', super: 'R', dodge: 'D', tag
 const PADS = { xbox: { light: 'X', heavy: 'Y', special: 'B', super: 'RT', dodge: 'A', tag: 'RB', assist: 'LB', pause: 'Menu' }, ps: { light: '□', heavy: '△', special: '○', super: 'R2', dodge: '✕', tag: 'R1', assist: 'L1', pause: 'Options' } };
 const PAD = { idx: -1, kind: 'xbox', prev: [], x: 0, y: 0, aim: false, hold: null, nav: 0, sel: 0 };
 const HINT_KBM = $('hint').innerHTML;
-const K = a => G.input === 'pad' ? PADS[PAD.kind][a] : KEYS[a];           // what a button is called in on-screen hints, for whichever device was touched last
-function useDevice(d) {                                   // swap every on-screen label between keyboard keys and controller glyphs
+const TOUCHL = { light: 'Jab', heavy: 'Kick', special: 'Special', super: 'Super', dodge: 'Dodge', tag: 'Tag', assist: 'Assist' };
+const K = a => G.input === 'pad' ? PADS[PAD.kind][a] : G.input === 'touch' ? TOUCHL[a] : KEYS[a];      // what a button is called in on-screen hints, for whichever device was touched last
+const hk = a => G.input === 'touch' ? '' : ` (${G.input === 'pad' ? PADS[PAD.kind][{ enter: 'dodge', esc: 'special', b: 'heavy' }[a]] : { enter: 'Enter', esc: 'Esc', b: 'B' }[a]})`;      // the shortcut shown on a menu button
+function useDevice(d) {                                   // 'kbm', 'pad' or 'touch': swap the on-screen labels and controls to match
   if (G.input === d) return; G.input = d; document.body.dataset.input = d;
-  if (d === 'pad') { M.on = M.rmb = M.lmb = false; P.order = null; }
+  if (d !== 'kbm') { M.on = M.rmb = M.lmb = false; P.order = null; }
+  if (d !== 'touch') { touch.x = touch.y = 0; TB.hold = null; }
   const L = d === 'pad' ? PADS[PAD.kind] : KEYS;
   for (const [id, a] of [['abQ', 'light'], ['abW', 'heavy'], ['abE', 'special'], ['abR', 'super'], ['abD', 'dodge'], ['abF', 'tag'], ['abG', 'assist']]) $(id).firstElementChild.textContent = L[a];
   $('hint').innerHTML = d === 'pad' ? `<b>Left stick</b> move · <b>right stick</b> aim · <kbd>${L.pause}</kbd> pause` : HINT_KBM;
@@ -1533,7 +1573,7 @@ function pollPad() {
   let gp = null; try { for (const p of (navigator.getGamepads ? navigator.getGamepads() : [])) if (p && p.connected && p.buttons.length >= 10) { gp = p; break; } } catch { return; }
   if (!gp) { if (PAD.idx >= 0) { PAD.idx = -1; PAD.x = PAD.y = 0; PAD.hold = null; if (PAD.aim) { PAD.aim = false; M.on = false; } useDevice('kbm'); toast('Controller disconnected.', 2.5); } return; }
   if (PAD.idx !== gp.index) {
-    PAD.idx = gp.index; PAD.prev = []; PAD.kind = /054c|dualsense|dualshock|playstation|ps[345]|wireless controller/i.test(gp.id) ? 'ps' : 'xbox';
+    PAD.idx = gp.index; PAD.prev = []; PAD.kind = /054c|dualsense|dualshock|playstation|\bps[345]\b/i.test(gp.id) && !/xbox|045e/i.test(gp.id) ? 'ps' : 'xbox';      // 054c is Sony's USB vendor id; an Xbox pad over Bluetooth also calls itself a "Wireless Controller"
     toast(`<b>Controller connected</b> (${PAD.kind === 'ps' ? 'PlayStation' : 'Xbox'} layout). Press any button to use it.`, 4);
   }
   const b = gp.buttons.map(q => q.pressed || q.value > .5), down = i => b[i] && !PAD.prev[i], dz = v => Math.abs(v) < .22 ? 0 : v;
@@ -1583,6 +1623,7 @@ function sim(real) {                                      // one tick of the gam
 }
 
 // ------------------------------------------------------------------ boot
+document.body.dataset.input = 'kbm'; if (matchMedia('(pointer: coarse)').matches) useDevice('touch');       // a phone or tablet starts with the touch controls
 buildArena('eng');
 card(`<div class="kick">Glenntooth &amp; Coffee Guy vs. the AI Transformation</div><h1>PER MY <em>LAST PUNCH</em></h1><div class="row"><button class="go" id="go" disabled>Loading the tag team…</button></div>`, {}, true);
 updateCamera(1); renderer.render(scene, camera);
@@ -1590,4 +1631,4 @@ Promise.all(FDEF.map(loadFighter)).then(fs => {
   team.push(...fs); fs.forEach((f, i) => { hudF[i].img.src = portrait(f); });
   showTitle(); requestAnimationFrame(frame);
 }).catch(err => { console.error(err); $('cardIn').innerHTML = `<h2>The tag team did not load.</h2><p>${String(err.message || err)}</p><p><small>This page needs to be served over http(s) with <code>assets/glenn.glb</code> and <code>assets/coffee.glb</code> next to it.</small></p>`; });
-window.PMLP = { G, T, P, M, team, enemies, hazards, shots, rings, beams, zones, pickups, keys, touch, LEVELS, BOTS, PAD, press, order, sim, pollPad, toScreen, spawnEnemy, damageEnemy, get active() { return active; } };      // for poking at it from the console
+window.PMLP = { G, T, P, M, team, enemies, hazards, shots, rings, beams, zones, pickups, keys, touch, LEVELS, BOTS, PAD, TB, press, order, sim, pollPad, toScreen, spawnEnemy, damageEnemy, get active() { return active; } };      // for poking at it from the console

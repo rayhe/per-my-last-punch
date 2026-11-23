@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0b0e14">
 <title>Per My Last Punch: Glenntooth &amp; Coffee Guy vs. the AI Transformation</title>
 <meta name="description" content="A WebGL tag-team brawler. Glenntooth and Coffee Guy fight through eight levels of rogue office AI and org-chart bogeymen, then an endless backlog.">
 <meta property="og:title" content="Per My Last Punch">
@@ -13,7 +15,7 @@
 <style>
 :root { --g: #ffb347; --c: #58c7ff; --bg: rgba(12, 16, 26, .84); --line: rgba(255, 255, 255, .14); --ink: #e9eef5; --dim: #9aa7b8; --bad: #ff5a5a; --ok: #7ee787; }
 * { box-sizing: border-box; margin: 0; }
-html, body { height: 100%; overflow: hidden; background: #0b0e14; color: var(--ink); font: 14px/1.45 system-ui, -apple-system, 'Segoe UI', sans-serif; -webkit-user-select: none; user-select: none; }
+html, body { height: 100%; overflow: hidden; background: #0b0e14; color: var(--ink); font: 14px/1.45 system-ui, -apple-system, 'Segoe UI', sans-serif; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; touch-action: none; overscroll-behavior: none; }
 #c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
 kbd { display: inline-block; min-width: 1.5em; padding: 0 .35em; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; background: rgba(255, 255, 255, .08); font: 600 12px/1.5 ui-monospace, Consolas, monospace; text-align: center; }
 .panel { background: var(--bg); border: 1px solid var(--line); border-radius: 12px; backdrop-filter: blur(4px); }
@@ -67,7 +69,6 @@ kbd { display: inline-block; min-width: 1.5em; padding: 0 .35em; border: 1px sol
 #hint { margin-top: 5px; font-size: 11px; color: var(--dim); white-space: nowrap; }
 #hint b { color: var(--ink); font-weight: 600; }
 body[data-mode="play"] #c { cursor: crosshair; }
-@media (pointer: coarse) { #bar { display: none; } }
 #mid { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); width: min(46vw, 560px); text-align: center; }
 #tick { display: block; width: fit-content; margin: 0 auto; padding: 5px 14px; border-radius: 10px; background: rgba(12, 16, 26, .78); border: 1px solid var(--line); }
 #lvl { font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: var(--dim); }
@@ -123,7 +124,7 @@ body[data-mode="play"] #c { cursor: crosshair; }
 #card { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 16px; background: rgba(5, 8, 14, .55); overflow: auto; }
 #card.on { display: flex; }
 #card.left { justify-content: flex-start; padding-left: max(16px, 5vw); background: linear-gradient(90deg, rgba(5, 8, 14, .8), rgba(5, 8, 14, 0) 75%); }
-#cardIn { width: min(100%, 720px); max-height: 100%; overflow: auto; padding: 22px 26px; background: rgba(13, 18, 30, .95); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 20px 60px rgba(0, 0, 0, .6); user-select: text; -webkit-user-select: text; }
+#cardIn { width: min(100%, 720px); max-height: 100%; overflow: auto; touch-action: pan-y; overscroll-behavior: contain; padding: 22px 26px; background: rgba(13, 18, 30, .95); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 20px 60px rgba(0, 0, 0, .6); user-select: text; -webkit-user-select: text; }
 #card.left #cardIn { width: min(100%, 560px); }
 #cardIn h1 { font-size: clamp(30px, 5vw, 52px); font-weight: 900; letter-spacing: .03em; line-height: 1; }
 #cardIn h1 em { font-style: normal; color: var(--g); }
@@ -162,20 +163,57 @@ button:disabled { opacity: .5; cursor: default; }
 .perks kbd { float: right; }
 
 /* ---------- touch ---------- */
+/* Shown while the last thing touched was the screen: a thumbstick zone on the left, a thumb-arc of buttons on the right. */
 #touch { position: fixed; inset: 0; display: none; pointer-events: none; }
-body[data-mode="play"] #touch.on { display: block; }
-.rot { display: none; color: #ffe066; }
-@media (orientation: portrait) and (pointer: coarse) { .rot { display: block; } }
-#stick { position: absolute; left: 0; bottom: 0; width: 45%; height: 55%; pointer-events: auto; touch-action: none; }
-#nub { position: absolute; width: 96px; height: 96px; margin: -48px 0 0 -48px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, .3); background: rgba(255, 255, 255, .06); display: none; }
-#nub i { position: absolute; left: 50%; top: 50%; width: 40px; height: 40px; margin: -20px; border-radius: 50%; background: rgba(255, 255, 255, .45); }
-#tb { position: absolute; right: 10px; bottom: 14px; display: grid; grid-template-columns: repeat(4, 58px); gap: 8px; pointer-events: auto; }
-#tb button { height: 58px; padding: 0; border-radius: 50%; font-size: 11px; background: rgba(20, 26, 40, .7); touch-action: none; }
-#tb .a { background: rgba(255, 179, 71, .8); color: #1b1300; }
-@media (max-width: 860px) {
-  #team { width: 212px; padding: 6px; } .fighter small { display: none; } .fighter.on img { width: 44px; height: 44px; } #cafTier { display: none; } #hint { display: none; } .ab { width: 50px; height: 50px; } .ab.sm { width: 42px; height: 42px; } #right { min-width: 0; padding: 6px 10px; } #pc b { font-size: 18px; } #combo b { font-size: 17px; }
-  #mid { top: 196px; width: 92vw; }
-  @media (orientation: landscape) { #mid { top: 8px; left: 58%; width: 44vw; } } .perks, .stats { grid-template-columns: 1fr 1fr; } #cardIn { padding: 16px; } #card.left { padding-left: 16px; }
+body[data-mode="play"][data-input="touch"] #touch { display: block; }
+body[data-paused="1"] #touch { display: none; }
+body[data-input="touch"] #bar { display: none; }
+#stick { position: absolute; left: 0; bottom: 0; width: 46%; height: 58%; pointer-events: auto; touch-action: none; }
+#nub { position: absolute; width: 104px; height: 104px; margin: -52px 0 0 -52px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, .3); background: rgba(255, 255, 255, .06); display: none; }
+#nub i { position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; margin: -22px; border-radius: 50%; background: rgba(255, 255, 255, .45); }
+#stickHint { position: absolute; left: calc(26px + env(safe-area-inset-left, 0px)); bottom: calc(26px + env(safe-area-inset-bottom, 0px)); width: 92px; height: 92px; border-radius: 50%; border: 2px dashed rgba(255, 255, 255, .2); color: rgba(255, 255, 255, .4); font-size: 10px; display: grid; place-items: center; pointer-events: none; }
+#tb { position: absolute; right: calc(8px + env(safe-area-inset-right, 0px)); bottom: calc(10px + env(safe-area-inset-bottom, 0px)); width: 232px; height: 204px; pointer-events: none; }
+.tk { position: absolute; width: 62px; height: 62px; padding: 0; border-radius: 50%; border: 2px solid rgba(255, 255, 255, .28); background: rgba(16, 22, 34, .62); color: var(--ink); font-size: 11px; font-weight: 700; overflow: hidden; pointer-events: auto; touch-action: none; -webkit-tap-highlight-color: transparent; }
+.tk i { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: rgba(0, 0, 0, .62); pointer-events: none; }
+.tk span { position: relative; z-index: 1; pointer-events: none; }
+.tk.big { width: 80px; height: 80px; font-size: 14px; }
+.tk.sm { width: 50px; height: 50px; font-size: 10px; }
+.tk.a { background: rgba(255, 179, 71, .85); color: #1b1300; border-color: rgba(255, 255, 255, .5); }
+.tk.ready { border-color: rgba(255, 255, 255, .62); }
+.tk.hot { background: var(--g); color: #1b1300; border-color: #fff; animation: glow .5s infinite alternate; }
+.tk.off { opacity: .28; }
+.tk:hover { background: rgba(16, 22, 34, .62); } .tk.a:hover, .tk.hot:hover { background: var(--g); }
+.tk:active { transform: scale(.92); filter: brightness(1.35); }
+#tbQ { right: 4px; bottom: 6px; } #tbW { right: 96px; bottom: 2px; } #tbE { right: 90px; bottom: 74px; } #tbD { right: 10px; bottom: 98px; }
+#tbR { right: 168px; bottom: 30px; } #tbF { right: 160px; bottom: 102px; } #tbG { right: 84px; bottom: 148px; }
+#tpause { display: none; position: absolute; top: 100%; right: 0; margin-top: 8px; width: 42px; height: 42px; padding: 0; border-radius: 50%; background: rgba(16, 22, 34, .7); pointer-events: auto; touch-action: none; }
+body[data-input="touch"] #tpause { display: block; }
+body[data-input="touch"] .kbd-only, body:not([data-input="touch"]) .touch-only { display: none; }
+body[data-input="touch"] .perks kbd { display: none; }
+#pause .row { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; justify-content: center; }
+
+/* ---------- small screens: phones in either orientation ---------- */
+@media (max-width: 900px), (max-height: 520px) {
+  #team { left: calc(8px + env(safe-area-inset-left, 0px)); top: 8px; width: min(50vw, 190px); padding: 6px; }
+  .fighter { padding: 4px; gap: 8px; } .fighter small { display: none; } .fighter img, .fighter.on img { width: 36px; height: 36px; } .fighter b { font-size: 11px; }
+  #caf { margin: 5px 4px 0; } #cafTier { display: none; } #cafTxt { font-size: 10px; }
+  #right { right: calc(8px + env(safe-area-inset-right, 0px)); top: 8px; min-width: 0; padding: 6px 10px; }
+  #pc b { font-size: 17px; } #pc small { font-size: 8px; } #combo { min-height: 30px; margin-top: 2px; } #combo b { font-size: 15px; } #combo span { font-size: 8px; } #perks { font-size: 12px; letter-spacing: 0; }
+  #mid { top: 6px; left: 54%; width: 37vw; } #tick { padding: 3px 10px; } #lvl { font-size: 9px; letter-spacing: .1em; } #wave { font-size: 11px; line-height: 1.2; }
+  #bossbar { margin-top: 4px; padding: 5px 8px; } #bossName { font-size: 12px; } #bossSub { font-size: 9px; margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } #bossbar .bar { height: 10px; } #status { font-size: 11px; margin-top: 4px; }
+  #hint { display: none; } .ab { width: 50px; height: 50px; } .ab.sm { width: 42px; height: 42px; }
+  #toast { left: 42%; bottom: calc(10px + env(safe-area-inset-bottom, 0px)); max-width: 36vw; font-size: 11px; padding: 6px 10px; }
+  #banner { top: 20%; } #banner h1 { font-size: clamp(22px, 6vw, 40px); } #banner p { font-size: 12px; }
+  .perks, .stats { grid-template-columns: 1fr 1fr; } #card { padding: 8px; align-items: flex-start; } #card.left { padding-left: 8px; } #cardIn { padding: 14px 16px; }
+  #cardIn h1 { font-size: 30px; } #cardIn h2 { font-size: 19px; } #cardIn .keys { font-size: 12px; gap: 4px 10px; } .grade .g { width: 64px; height: 64px; font-size: 32px; } .grade .g.pip { font-size: 20px; }
+  .ft { font-size: 14px; } .ft.big { font-size: 20px; } .ft.bad { font-size: 16px; } .bubble { font-size: 11px; max-width: 170px; } .bubble.sm { font-size: 10px; }
+  #pause h2 { font-size: 28px; }
+}
+@media (orientation: portrait) and (max-width: 900px) {
+  #mid { top: 152px; left: 50%; width: 94vw; }
+  #toast { left: 50%; bottom: calc(226px + env(safe-area-inset-bottom, 0px)); max-width: 88vw; }
+  #banner { top: 34%; }
+  .perks { grid-template-columns: 1fr; } .perks button { padding: 9px 12px; }
 }
 </style>
 </head>
@@ -194,7 +232,7 @@ body[data-mode="play"] #touch.on { display: block; }
     <div id="bossbar" class="panel"><div id="bossName"></div><div id="bossSub"></div><div class="bar"><i id="bossFill"></i></div></div>
     <div id="status"></div>
   </div>
-  <div id="right" class="panel"><div id="pc"><small>Political capital</small><b>0</b></div><div id="combo"></div><div id="perks"></div></div>
+  <div id="right" class="panel"><div id="pc"><small>Political capital</small><b>0</b></div><div id="combo"></div><div id="perks"></div><button id="tpause" aria-label="Pause">II</button></div>
   <div id="bar" class="panel">
     <div id="abs">
       <div class="ab" data-c="ab" id="abQ"><kbd>Q</kbd><span>Jab</span><i></i></div>
@@ -213,18 +251,24 @@ body[data-mode="play"] #touch.on { display: block; }
 <div id="float"></div>
 <div id="banner"><h1></h1><p></p></div>
 <div id="toast" class="panel"></div>
-<div id="pause"><h2>OUT OF OFFICE</h2><p>Paused. <kbd>P</kbd> to return to your desk. <kbd>M</kbd> mutes.</p></div>
+<div id="pause"><h2>OUT OF OFFICE</h2><p class="kbd-only">Paused. <kbd>P</kbd> to return to your desk. <kbd>M</kbd> mutes.</p><p class="touch-only">Paused.</p>
+  <div class="row"><button class="go" id="pResume">Back to your desk</button><button id="pMute">Sound on/off</button><button id="pQuit">Quit to title</button></div></div>
 <div id="card"><div id="cardIn"></div></div>
 
 <div id="touch">
-  <div id="stick"><div id="nub"><i></i></div></div>
+  <div id="stick"><div id="stickHint">move</div><div id="nub"><i></i></div></div>
   <div id="tb">
-    <button data-a="super">Super</button><button data-a="assist">Assist</button><button data-a="tag">Tag</button><button data-a="special">Spec</button>
-    <button data-a="pause">II</button><button data-a="dodge">Dodge</button><button data-a="heavy">Kick</button><button data-a="light" class="a">Jab</button>
+    <button class="tk big a" data-c="tk big a" data-a="light" id="tbQ"><span>Jab</span><i></i></button>
+    <button class="tk" data-c="tk" data-a="heavy" id="tbW"><span>Kick</span><i></i></button>
+    <button class="tk" data-c="tk" data-a="special" id="tbE"><span>Special</span><i></i></button>
+    <button class="tk" data-c="tk" data-a="dodge" id="tbD"><span>Dodge</span><i></i></button>
+    <button class="tk" data-c="tk" data-a="super" id="tbR"><span>Super</span><i></i></button>
+    <button class="tk sm" data-c="tk sm" data-a="tag" id="tbF"><span>Tag</span><i></i></button>
+    <button class="tk sm" data-c="tk sm" data-a="assist" id="tbG"><span>Assist</span><i></i></button>
   </div>
 </div>
 
 <script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }</script>
-<script type="module" src="game.js?v=4"></script>
+<script type="module" src="game.js?v=5"></script>
 </body>
 </html>

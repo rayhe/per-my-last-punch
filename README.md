@@ -41,7 +41,7 @@ Arrow keys move if you would rather not use the mouse.
 
 In menus, `A`/`✕` confirms, `B`/`○` goes back, `Y`/`△` starts the endless backlog, and the d-pad picks a perk. Pads are read through the browser's standard gamepad mapping.
 
-On a phone there is a thumbstick and buttons; hold it sideways.
+**Phones and tablets.** Drag anywhere on the left to move; the right thumb gets Jab (hold to repeat), Kick, Dodge, Special, Super, Tag and Assist, each showing its cooldown. Attacks and specials find the nearest robot by themselves. It plays upright or sideways (sideways shows more of the room), and the title screen has a full-screen button where the browser allows one. The game switches between touch, keyboard and controller according to whichever you touched last.
 
 ## The tag team
 
